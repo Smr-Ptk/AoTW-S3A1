@@ -1,0 +1,1977 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>The Fractured Crown</title>
+
+  <!-- React 18 + ReactDOM via CDN — no build step required -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <!-- Babel compiles JSX in-browser -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <!-- Tailwind for utility classes — font-mono used throughout -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <style>
+    /* ============================================================
+       GLOBAL — monospace terminal aesthetic, no scroll during play
+    ============================================================ */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body, #root { height: 100%; overflow: hidden; }
+    body {
+      background: #1a1a2e;
+      color: #e0e0e0;
+      font-family: 'Courier New', Courier, monospace;
+    }
+
+    /* Typewriter cursor blink */
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+    .cursor::after { content:'▌'; animation: blink 0.7s infinite; color:#ffff00; }
+
+    /* Dice cube shake while rolling */
+    @keyframes shake {
+      0%,100%{transform:translate(0,0) rotate(0deg)}
+      20%{transform:translate(-5px,-3px) rotate(-8deg)}
+      40%{transform:translate(5px,3px) rotate(8deg)}
+      60%{transform:translate(-3px,5px) rotate(-5deg)}
+      80%{transform:translate(3px,-5px) rotate(5deg)}
+    }
+    .dice-shake { animation: shake 0.12s ease-in-out infinite; }
+
+    /* Hitsplat result circle fades upward */
+    @keyframes hitsplat {
+      0%  {opacity:1; transform:scale(1)   translateY(0)}
+      70% {opacity:1; transform:scale(1.1) translateY(-8px)}
+      100%{opacity:0; transform:scale(0.8) translateY(-24px)}
+    }
+    .hitsplat { animation: hitsplat 2s ease-out forwards; }
+
+    /* Overlay slide-in from right */
+    @keyframes slideRight { from{transform:translateX(100%)} to{transform:translateX(0)} }
+    .slide-right { animation: slideRight 0.25s ease-out; }
+
+    /* Overlay slide-in from bottom */
+    @keyframes slideUp { from{transform:translateY(100%);opacity:0} to{transform:translateY(0);opacity:1} }
+    .slide-up { animation: slideUp 0.25s ease-out; }
+
+    /* Map territory fill transitions */
+    .region { transition: fill 0.6s ease; }
+
+    /* Barrier glow pulse for Turn 5 */
+    @keyframes glow { 0%,100%{stroke-opacity:0.5} 50%{stroke-opacity:1} }
+    .barrier-glow { animation: glow 1.4s ease-in-out infinite; }
+
+    /* Title screen crown shimmer */
+    @keyframes shimmer {
+      0%,100%{text-shadow:0 0 10px #ffd700,0 0 20px #daa520}
+      50%{text-shadow:0 0 24px #ffd700,0 0 48px #daa520,0 0 72px #b8860b}
+    }
+    .crown-shimmer { animation: shimmer 3s ease-in-out infinite; }
+
+    /* Scrollbars styled to match theme */
+    .scrollable { overflow-y:auto; scrollbar-width:thin; scrollbar-color:#0f3460 #16213e; }
+    .scrollable::-webkit-scrollbar { width:5px; }
+    .scrollable::-webkit-scrollbar-track { background:#16213e; }
+    .scrollable::-webkit-scrollbar-thumb { background:#0f3460; border-radius:3px; }
+
+    /* Choice and NPC-select button hover transitions */
+    .choice-btn { transition: background 0.12s, border-color 0.12s, color 0.12s; }
+    .choice-btn:hover { background:#c0002a !important; border-color:#ff6b6b !important; }
+    .npc-btn  { transition: border-color 0.12s; }
+    .npc-btn:hover  { border-color:#00ffff !important; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+// ================================================================
+// THE FRACTURED CROWN — A Performance Script
+// Art of the Web, Section 3, Assignment 2
+//
+// Single index.html. No build step. CDN only.
+// All game state in one React.useState at App root.
+// Every story beat runs through a step-queue processed sequentially.
+// Dice are visible. Outcomes change. No two playthroughs are the same.
+// ================================================================
+
+// ----------------------------------------------------------------
+// UTILITY
+// ----------------------------------------------------------------
+
+// roll(min, max) — the core chance mechanic required by the rubric.
+// Returns an integer from min to max inclusive.
+// Every significant event in the game passes through here.
+const roll = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+
+// Faction key → hex color used on map and in portraits
+const FACTION_COLOR = {
+  ashward:      '#808080',
+  golmere:      '#ffd700',
+  storrund:     '#daa520',
+  vaelthorne:   '#cc0000',
+  barrier_watch:'#2a2a3a',
+  pale_walkers: '#a8d8ea',
+  neutral:      '#2d4059',
+  contested:    '#4a3468',
+  loyalists:    '#b87d10',
+  crown:        '#2a5080',
+};
+
+// ----------------------------------------------------------------
+// GAME CONTENT — NPC metadata, court dialogue, pseudo-code per turn
+// ----------------------------------------------------------------
+
+// NPC display info: name shown in dialogue panel, faction colour, portrait type
+const NPC = {
+  beren:    { name:'Beren Storrund',    color:'#daa520', portrait:'crown'    },
+  aldric:   { name:'Aldric Ashward',    color:'#a0a0a0', portrait:'collar'   },
+  elara:    { name:'Elara Golmere',     color:'#ffd700', portrait:'longhair' },
+  halric:   { name:'Halric Golmere',    color:'#ccaa00', portrait:'short'    },
+  aldren:   { name:'Aldren Thorne',     color:'#4a9a6a', portrait:'goatee'   },
+  maegor:   { name:'Maegor Storrund',   color:'#daa520', portrait:'crown'    },
+  corwin:   { name:'Corwin Frost',      color:'#8090b0', portrait:'hood'     },
+  lysara:   { name:'Lysara Vaelthorne', color:'#cc0000', portrait:'longhair' },
+  narrator: { name:'The Chronicler',    color:'#c0c0c0', portrait:'scroll'   },
+  merchant: { name:'Travelling Merchant',color:'#9a7a40',portrait:'short'    },
+};
+
+// Court dialogue used in Turn 2 — truth only revealed on roll >= 4
+const COURT = {
+  elara: {
+    greeting: "An Ashward in Crownharbour. How... quaint.",
+    truth:    "The previous Hand asked too many questions about my children. Hair colour, of all things. How tedious.",
+    lie:      "The previous Hand drank himself to death. Tragic, but not uncommon in this city.",
+  },
+  halric: {
+    greeting: "Ah, the chronicler. Writing history, or making it? Both are forms of lying.",
+    truth:    "My sister's children look nothing like the king. I'm not one for riddles, but that one solves itself.",
+    lie:      "I know nothing. I'm the family disappointment — they don't tell me things.",
+  },
+  aldren: {
+    greeting: "Information is currency. What can you afford?",
+    truth:    "Follow the gold. The previous Hand traced payments from the crown to certain... private arrangements. I have the ledger.",
+    lie:      "The previous Hand was old and tired. Sometimes the simplest explanation is the true one.",
+  },
+};
+
+// Pseudo-code displayed in the Source Code overlay — one block per turn.
+// Per rubric: a creative interpretation of programming logic as a performance score.
+// It is NOT syntactically valid JavaScript. It is a score.
+const SOURCE = {
+  0: `-- THE FRACTURED CROWN — A Performance Script --
+
+This script governs the chronicle of Valdrun.
+It is not valid code. It is a score.
+Each performance produces a different history.
+The dice decide. The chronicler witnesses.
+
+function beginChronicle() {
+    let state = {
+        aldric: { alive: true, location: "Greyholt" },
+        throne: "Beren Storrund",
+        secret: "unknown",
+        dragons: 0,
+        ending: null
+    }
+
+    state = kingSummons(state)
+    state = courtOfWhispers(state)
+    state = theBetrayal(state)
+    state = warOfFiveClaimants(state)
+    state = beyondTheBarrier(state)
+
+    inscribe(state)
+    announce("Play again. History is never settled.")
+}`,
+
+  1: `function kingSummons(aldric, beren) {
+    beren.speak("I need someone I can trust. Come south.")
+    let omen = roll(1, 6)
+    if (omen >= 4) {
+        aldric.suspicion = true
+        aldric.speak("Something feels wrong... but duty calls.")
+    }
+    let choice = chronicler.choose("Accept", "Refuse")
+    if (choice == "Refuse") {
+        aldric.alive = true
+        aldric.location = "Greyholt"
+        return skip_to_turn_4
+    }
+    aldric.location = "Crownharbour"
+    return next_turn
+}`,
+
+  2: `function courtOfWhispers(aldric, npcs) {
+    let chosen = chronicler.choose_two(npcs)
+    let clues = 0
+
+    for each npc in chosen {
+        let honesty = roll(1, 6)
+        if (honesty >= 4) {
+            npc.speak(npc.truth)
+            clues += 1
+        } else {
+            npc.speak(npc.lie)
+        }
+    }
+
+    if (clues >= 2) {
+        aldric.knows_secret = true
+    } else if (clues == 1) {
+        aldric.suspects = true
+    }
+    return next_turn
+}`,
+
+  3: `function theBetrayal(aldric, maegor) {
+    announce("The king is dead. Long live the king.")
+    maegor.sit(fracturedCrown)
+
+    if (!aldric.alive || aldric.location != "Crownharbour") {
+        return next_turn
+    }
+
+    let action = chronicler.choose("Confront", "Flee", "Seek allies")
+
+    if (action == "Confront") {
+        let fate = roll(1, 6)
+        if (fate >= 4) { aldric.status = "imprisoned" }
+        else { aldric.alive = false
+               announce("The sword falls. The North remembers.") }
+    }
+    if (action == "Flee") {
+        let fate = roll(1, 6)
+        if (fate >= 3) { aldric.location = "Fled" }
+        else { aldric.alive = false }
+    }
+    if (action == "Seek allies") {
+        let fate = roll(1, 6)
+        if (fate >= 5) { aldren.help(aldric); aldric.location = "Fled" }
+        else { aldren.betray(aldric); aldric.status = "imprisoned" }
+    }
+    return next_turn
+}`,
+
+  4: `function warOfFiveClaimants(factions, map) {
+    let northResult = campaign(ashward, golmere, roll(1,6))
+    let eastResult  = campaign(storrundLoyalists, crown, roll(1,6))
+    let dragons     = hatchDragons(lysara, roll(1,6))
+
+    if (northResult.winner == "ashward") {
+        map.control("Midlands", "grey")
+    }
+    if (eastResult.winner == "loyalists") {
+        map.control("Storrund Bay", "dark gold")
+    }
+    lysara.dragons = dragons
+    announce("Across the sea, " + dragons + " dragon(s) take flight.")
+
+    return next_turn
+}`,
+
+  5: `function beyondTheBarrier(factions, barrier) {
+    let ravenArrives = roll(1, 6) >= 3
+    let paleWalkersAdvance = true
+
+    if (!ravenArrives) {
+        announce("The raven never came.")
+        return ending("fall")
+    }
+
+    let action = chronicler.choose("Unite", "Ignore")
+    if (action == "Ignore") {
+        return ending("fall")
+    }
+
+    let alliance = formAlliance(factions, roll(1,6))
+    if (alliance && lysara.dragons >= 2) {
+        return ending("victory")
+    } else if (alliance) {
+        return ending("pyrrhic")
+    } else {
+        return ending("fall")
+    }
+}`,
+};
+
+// ----------------------------------------------------------------
+// INITIAL STATE (PRD §7)
+// All game state + UI state in one object. Single useState in App.
+// ----------------------------------------------------------------
+const getInitialState = () => ({
+  // ── Turn tracking ─────────────────────────────────────────────
+  currentTurn: 0,     // 0 = title screen, 1–5 = turns, 6 = game over
+  gameOver:    false,
+
+  // ── Characters ────────────────────────────────────────────────
+  aldric: {
+    alive:        true,
+    location:    'Greyholt',   // 'Greyholt'|'Crownharbour'|'Imprisoned'|'Fled'|'Dead'
+    suspicion:    false,       // true if omen roll >= 4 in Turn 1
+    knows_secret: false,       // true if 2 clues found in Turn 2
+    suspects:     false,       // true if exactly 1 clue found in Turn 2
+    status:       null,        // null | 'imprisoned'
+  },
+  beren:  { alive: true  },
+  maegor: { sitsThrone: false },
+  aldren: { consulted: false, betrayed: null },
+  lysara: { dragons: 0 },
+
+  // ── Map faction control (drives SVG fill colors) ───────────────
+  map: {
+    north:       'ashward',
+    midlands:    'contested',
+    westerlands: 'golmere',
+    storrundBay: 'storrund',
+    crownharbour:'storrund',
+    barrier:     'barrier_watch',
+    emberIsles:  'vaelthorne',
+  },
+
+  // ── Turn 5 outcomes ───────────────────────────────────────────
+  ravenArrived:   false,
+  allianceFormed: false,
+  ending:         null,   // 'victory' | 'pyrrhic' | 'fall'
+
+  // ── Playthrough logging ───────────────────────────────────────
+  diceLog:       [],   // [{ turn, purpose, result }]
+  chronicleLog:  [],   // narrative strings for Chronicle overlay
+  playthroughId: Math.floor(1000 + Math.random() * 9000),
+
+  // ── Dialogue step queue ───────────────────────────────────────
+  // Game flow is driven by consuming this queue step by step.
+  // Step types: 'line' | 'system' | 'choice' | 'npc_select' |
+  //             'show_dice' | 'update' | 'log' | 'end'
+  stepQueue: [],
+
+  // ── Current dialogue being displayed ─────────────────────────
+  currentLine:   null,   // { speaker, text, isSystem }
+  charIndex:     0,      // how many characters have been revealed
+  isTyping:      false,  // true while typewriter is running
+  waitingForInput: false,// true when player must click to continue or choose
+
+  // ── Player choices ────────────────────────────────────────────
+  choices:       [],     // [{ label, value }] displayed as choice buttons
+  npcSelectPhase: null,  // null | { npcs:[...], selected:[], count:2 }
+
+  // ── Dice animation ────────────────────────────────────────────
+  diceAnimating: false,
+  diceResult:    null,
+  diceIsGood:    false,
+
+  // ── UI overlay toggles ────────────────────────────────────────
+  showSourceCode: false,
+  showChronicle:  false,
+  showAbout:      false,
+});
+
+// ----------------------------------------------------------------
+// STEP PROCESSOR — pure function (no side-effects)
+// Takes current state, consumes the first step in the queue,
+// returns new state. Recursive for instant steps (update, log).
+// Stops on: line, system, choice, npc_select, show_dice, end.
+// ----------------------------------------------------------------
+function processStep(state) {
+  const q = state.stepQueue;
+  if (!q || q.length === 0) return { ...state, waitingForInput: false };
+
+  const [step, ...rest] = q;
+
+  switch (step.type) {
+
+    // Show a dialogue line with typewriter effect
+    case 'line':
+    case 'system':
+      return {
+        ...state,
+        stepQueue:      rest,
+        currentLine:    { speaker: step.speaker, text: step.text, isSystem: step.type === 'system' },
+        charIndex:      0,
+        isTyping:       true,
+        waitingForInput:false,
+        choices:        [],
+        npcSelectPhase: null,
+      };
+
+    // Present choice buttons — stops processing until player picks
+    case 'choice':
+      return {
+        ...state,
+        stepQueue:      rest,
+        waitingForInput:true,
+        isTyping:       false,
+        choices:        step.options,
+        npcSelectPhase: null,
+      };
+
+    // Present NPC selection interface (Turn 2)
+    case 'npc_select':
+      return {
+        ...state,
+        stepQueue:      rest,
+        waitingForInput:true,
+        isTyping:       false,
+        choices:        [],
+        currentLine:    null,
+        npcSelectPhase: { npcs: step.npcs, selected: [], count: step.count },
+      };
+
+    // Show dice animation — stops processing until animation finishes.
+    // A useEffect in App watches diceAnimating and drives the sequence.
+    case 'show_dice':
+      return {
+        ...state,
+        stepQueue:     rest,   // remaining steps will resume after animation
+        diceAnimating: true,
+        diceResult:    null,
+        diceIsGood:    step.result >= (step.threshold ?? 4),
+        _diceValue:    step.result, // stash so useEffect can show it
+      };
+
+    // Apply arbitrary state updates — processed immediately (recursive)
+    case 'update':
+      return processStep({ ...state, ...step.updates, stepQueue: rest });
+
+    // Append a chronicle log entry — processed immediately (recursive)
+    case 'log':
+      return processStep({
+        ...state,
+        stepQueue:     rest,
+        chronicleLog:  [...state.chronicleLog, step.text],
+        diceLog:       step.dice
+          ? [...state.diceLog, step.dice]
+          : state.diceLog,
+      });
+
+    // Mark game over
+    case 'end':
+      return {
+        ...state,
+        stepQueue:      [],
+        gameOver:       true,
+        currentTurn:    6,
+        isTyping:       false,
+        waitingForInput:false,
+        choices:        [],
+      };
+
+    // Sentinel or unknown step — stop without consuming.
+    // consumeSentinels() in the event handlers will process '_' type steps.
+    // This ensures sentinel steps are never silently discarded mid-sequence.
+    default:
+      return state;
+  }
+}
+
+// ----------------------------------------------------------------
+// TURN BUILDERS — pure functions that return arrays of steps.
+// Pre-rolling dice here so sequences can be constructed up-front.
+// show_dice steps display the pre-rolled result with animation.
+// ----------------------------------------------------------------
+
+function buildTurn1Steps(gs) {
+  // Omen check — rolled immediately so we can build conditional steps now
+  const omenRoll = roll(1, 6);
+  const hasSuspicion = omenRoll >= 4;
+
+  return [
+    { type:'system', speaker:'narrator',
+      text:"Greyholt. The great hall is cold. You carry Aldric Ashward's record as his chronicler." },
+    { type:'line', speaker:'beren',
+      text:"The realm needs a steady hand. Mine shakes from wine. Come south, old friend." },
+    { type:'line', speaker:'beren',
+      text:"I didn't ride all this way for the scenery, Aldric." },
+
+    // Show the omen dice roll visually
+    { type:'show_dice', result:omenRoll, threshold:4 },
+    { type:'log',
+      text:`Turn 1 — Omen roll: ${omenRoll}`,
+      dice:{ turn:1, purpose:'omen check', result:omenRoll } },
+    { type:'system', speaker:'narrator',
+      text: hasSuspicion
+        ? `[OMEN ROLL: ${omenRoll}] A raven arrives before dawn. Unsigned. Three words: "Trust no one."`
+        : `[OMEN ROLL: ${omenRoll}] The night is quiet. No ill omens stir the northern air.` },
+
+    // Aldric's response varies by omen
+    hasSuspicion
+      ? { type:'line', speaker:'aldric',
+          text:"A raven came in the night. Unsigned. Three words: 'Trust no one.' ...I'll ride at dawn anyway." }
+      : { type:'line', speaker:'aldric',
+          text:"You honour me, Your Grace. I'll ride at dawn." },
+
+    // Apply suspicion state silently
+    { type:'update', updates:{ aldric:{ ...gs.aldric, suspicion:hasSuspicion } } },
+
+    // Player choice
+    { type:'choice', options:[
+      { label:'ACCEPT THE SUMMONS',    value:'accept' },
+      { label:'REFUSE AND STAY NORTH', value:'refuse' },
+    ]},
+  ];
+}
+
+function buildTurn2Steps(gs) {
+  // Aldric stayed north → merchant interlude, then skip straight to Turn 4
+  if (gs.aldric.location !== 'Crownharbour') {
+    return [
+      { type:'update', updates:{ currentTurn:2 } },
+      { type:'system', speaker:'narrator',
+        text:"Three weeks pass. A travelling merchant arrives at Greyholt with news from the south." },
+      { type:'line', speaker:'merchant',
+        text:"They say the old Hand is dead. Throat cut — called it an accident. The court's rotten to the core." },
+      { type:'line', speaker:'merchant',
+        text:"That new queen's brother is something else. Eyes everywhere. Wouldn't trust him with a copper coin." },
+      { type:'system', speaker:'narrator',
+        text:"Aldric listens. He doesn't ride south. The rumours grow." },
+      { type:'log', text:"Aldric stayed in Greyholt. Court of Whispers skipped." },
+      // This special sentinel triggers handleAdvance2 to jump to Turn 4
+      { type:'_skip_to_turn4' },
+    ];
+  }
+
+  return [
+    { type:'update', updates:{ currentTurn:2 } },
+    { type:'system', speaker:'narrator',
+      text:"Crownharbour. The throne room gleams with Golmere gold. The previous Hand is dead — officially, a hunting accident." },
+    { type:'system', speaker:'narrator',
+      text:"Time is short before the royal feast. Three people in this room know something true." },
+    { type:'npc_select', npcs:['elara','halric','aldren'], count:2 },
+  ];
+}
+
+// Called from handleNpcSelect once both NPCs are chosen
+function buildTurn2NpcSteps(gs, selectedNpcs) {
+  const steps = [];
+  let clues = 0;
+
+  // Roll honesty for each chosen NPC, build their dialogue sequence
+  const rollResults = selectedNpcs.map(npc => {
+    const r = roll(1, 6);
+    if (r >= 4) clues++;
+    return { npc, r, honest: r >= 4 };
+  });
+
+  rollResults.forEach(({ npc, r, honest }) => {
+    steps.push(
+      { type:'show_dice', result:r, threshold:4 },
+      { type:'log',
+        text:`Turn 2 — ${NPC[npc].name} honesty roll: ${r}`,
+        dice:{ turn:2, purpose:`${NPC[npc].name} honesty`, result:r } },
+      { type:'system', speaker:'narrator',
+        text:`[HONESTY ROLL for ${NPC[npc].name}: ${r}] ${honest ? 'They speak truth.' : 'They deflect.'}` },
+      { type:'line', speaker:npc, text:COURT[npc].greeting },
+      { type:'line', speaker:npc, text: honest ? COURT[npc].truth : COURT[npc].lie },
+    );
+  });
+
+  // Update knowledge state based on clues gathered
+  const aldrenSelected = selectedNpcs.includes('aldren');
+  steps.push(
+    { type:'update', updates:{
+        aldric:{ ...gs.aldric, knows_secret: clues >= 2, suspects: clues === 1 },
+        aldren:{ ...gs.aldren, consulted: aldrenSelected },
+    }},
+    { type:'system', speaker:'narrator',
+      text: clues >= 2
+        ? "Two fragments of truth. The pattern is clear. Maegor is not the true heir."
+        : clues === 1
+        ? "One fragment. Something feels wrong — but you can't be certain."
+        : "Both deflected. The truth remains hidden beneath courtly veneers." },
+    { type:'log', text:`Court of Whispers — ${clues} clue(s). Secret: ${clues>=2?'known':clues===1?'suspected':'unknown'}.` },
+  );
+
+  return steps;
+}
+
+function buildTurn3Steps(gs) {
+  const aldricPresent = gs.aldric.alive && gs.aldric.location === 'Crownharbour';
+
+  const opening = [
+    { type:'update', updates:{ currentTurn:3 } },
+    { type:'system', speaker:'narrator',
+      text:"Three days later. King Beren Storrund is dead. A hunting accident — the third this month." },
+    { type:'line', speaker:'maegor',
+      text:"The throne is mine by right. Kneel, or learn what iron feels like." },
+    { type:'update', updates:{
+        beren:  { alive:false },
+        maegor: { sitsThrone:true },
+        map:    { ...gs.map, crownharbour:'golmere' },
+    }},
+  ];
+
+  if (!aldricPresent) {
+    return [
+      ...opening,
+      { type:'system', speaker:'narrator',
+        text:"With no one to challenge him, Maegor takes the Fractured Crown unopposed." },
+      { type:'line', speaker:'maegor', text:"Finally. Bring me wine. And someone to punish." },
+      { type:'log', text:"Aldric was not in Crownharbour. Maegor crowned unopposed." },
+      { type:'_goto_turn4' },
+    ];
+  }
+
+  return [
+    ...opening,
+    gs.aldric.knows_secret
+      ? { type:'system', speaker:'narrator',
+          text:"Aldric knows the truth. Maegor is not Beren's true heir. He could speak now — or flee." }
+      : { type:'system', speaker:'narrator',
+          text:"Aldric stands in the throne room. He must choose his next move carefully." },
+    { type:'choice', options:[
+      { label:'CONFRONT THE THRONE', value:'confront'    },
+      { label:'FLEE CROWNHARBOUR',   value:'flee'        },
+      { label:'SEEK ALLIES',         value:'seek_allies' },
+    ]},
+  ];
+}
+
+// Called after player picks a Turn 3 action, with pre-rolled fate
+function buildTurn3OutcomeSteps(gs, action, fateRoll) {
+  const base = [
+    { type:'show_dice', result:fateRoll, threshold: action === 'flee' ? 3 : action === 'seek_allies' ? 5 : 4 },
+    { type:'log',
+      text:`Turn 3 — ${action} fate roll: ${fateRoll}`,
+      dice:{ turn:3, purpose:`${action} fate`, result:fateRoll } },
+    { type:'system', speaker:'narrator', text:`[FATE ROLL: ${fateRoll}]` },
+  ];
+
+  if (action === 'confront') {
+    if (fateRoll >= 4) {
+      return [...base,
+        { type:'line', speaker:'maegor', text:"You dare question ME? Guards! Throw this man in irons." },
+        { type:'system', speaker:'narrator', text:"Aldric is seized and locked in the dungeons beneath Crownharbour. He lives — for now." },
+        { type:'update', updates:{ aldric:{ ...gs.aldric, status:'imprisoned', location:'Imprisoned' } }},
+        { type:'log', text:"Aldric confronted Maegor. Imprisoned." },
+        { type:'_goto_turn4' },
+      ];
+    }
+    return [...base,
+      { type:'line', speaker:'maegor', text:"You dare question ME? Guards!" },
+      { type:'system', speaker:'narrator', text:"The sword falls. The North remembers." },
+      { type:'update', updates:{ aldric:{ ...gs.aldric, alive:false, location:'Dead' } }},
+      { type:'log', text:"Aldric confronted Maegor. Executed." },
+      { type:'_goto_turn4' },
+    ];
+  }
+
+  if (action === 'flee') {
+    if (fateRoll >= 3) {
+      return [...base,
+        { type:'system', speaker:'narrator', text:"Aldric slips through the servant passages. He rides north in the night, ahead of the guards." },
+        { type:'update', updates:{ aldric:{ ...gs.aldric, location:'Fled' } }},
+        { type:'log', text:"Aldric fled Crownharbour successfully." },
+        { type:'_goto_turn4' },
+      ];
+    }
+    return [...base,
+      { type:'system', speaker:'narrator', text:"The guards catch him at the city gates. He doesn't make it." },
+      { type:'update', updates:{ aldric:{ ...gs.aldric, alive:false, location:'Dead' } }},
+      { type:'log', text:"Aldric tried to flee. Caught and executed." },
+      { type:'_goto_turn4' },
+    ];
+  }
+
+  if (action === 'seek_allies') {
+    if (fateRoll >= 5) {
+      return [...base,
+        { type:'line', speaker:'aldren', text:"The tunnels beneath the keep. Go now. You owe me a kingdom." },
+        { type:'update', updates:{
+            aldric:{ ...gs.aldric, location:'Fled' },
+            aldren:{ ...gs.aldren, betrayed:false },
+        }},
+        { type:'log', text:"Aldren Thorne helped Aldric escape." },
+        { type:'_goto_turn4' },
+      ];
+    }
+    return [...base,
+      { type:'line', speaker:'aldren', text:"I did warn you — information is currency. And Elara pays better." },
+      { type:'update', updates:{
+          aldric:{ ...gs.aldric, status:'imprisoned', location:'Imprisoned' },
+          aldren:{ ...gs.aldren, betrayed:true },
+      }},
+      { type:'log', text:"Aldren Thorne betrayed Aldric. Imprisoned." },
+      { type:'_goto_turn4' },
+    ];
+  }
+
+  return base;
+}
+
+function buildTurn4Steps(gs) {
+  // Three simultaneous campaigns — rolled up-front so we can build narrative
+  const northRoll   = roll(1, 6);
+  const eastRoll    = roll(1, 6);
+  const dragonRoll  = roll(1, 6);
+
+  const northWinner  = northRoll  >= 4 ? 'ashward'   : 'golmere';
+  const eastWinner   = eastRoll   >= 4 ? 'loyalists' : 'crown';
+  const dragonCount  = dragonRoll <= 2 ? 1 : dragonRoll <= 4 ? 2 : 3;
+
+  const northLine = northWinner === 'ashward'
+    ? "Grey banners fly over the Midlands. The wolves advance."
+    : "The Golmere line holds. Gold buys sharper swords.";
+  const eastLine = eastWinner === 'loyalists'
+    ? "The Storrund coast rises. The old guard marches on the capital."
+    : "Crown forces hold Storrund Bay. Maegor's gold talks louder than loyalty.";
+  const dragonLine = dragonCount === 1
+    ? "Across the Pale Sea, a single dragon screams into the sky. It will have to be enough."
+    : dragonCount === 2
+    ? "Two dragons rise from the Ember Isles. The air smells of fire and old magic."
+    : "Three. The sky burns. Valdrun is not ready.";
+
+  return [
+    { type:'update', updates:{ currentTurn:4 } },
+    { type:'system', speaker:'narrator',
+      text:"The map of Valdrun. Five factions. Three campaigns. The dice of war are cast simultaneously." },
+
+    // North campaign
+    { type:'show_dice', result:northRoll, threshold:4 },
+    { type:'log',
+      text:`Turn 4 — North campaign roll: ${northRoll} → ${northWinner}`,
+      dice:{ turn:4, purpose:'north campaign', result:northRoll } },
+    { type:'system', speaker:'narrator',
+      text:`[NORTH ROLL: ${northRoll}] Ashward vs. Golmere at the River Ashrun.` },
+    { type:'line', speaker:'narrator', text:northLine },
+
+    // East rebellion
+    { type:'show_dice', result:eastRoll, threshold:4 },
+    { type:'log',
+      text:`Turn 4 — East rebellion roll: ${eastRoll} → ${eastWinner}`,
+      dice:{ turn:4, purpose:'east rebellion', result:eastRoll } },
+    { type:'system', speaker:'narrator',
+      text:`[EAST ROLL: ${eastRoll}] Storrund Loyalists vs. Crown forces.` },
+    { type:'line', speaker:'narrator', text:eastLine },
+
+    // Dragon hatching — threshold 1 (any roll succeeds for 1+ dragons)
+    { type:'show_dice', result:dragonRoll, threshold:1 },
+    { type:'log',
+      text:`Turn 4 — Dragon hatch roll: ${dragonRoll} → ${dragonCount} dragon(s)`,
+      dice:{ turn:4, purpose:'dragon hatching', result:dragonRoll } },
+    { type:'system', speaker:'narrator',
+      text:`[DRAGON ROLL: ${dragonRoll}] Lysara Vaelthorne tends her clutch on the Ember Isles.` },
+    { type:'line', speaker:'narrator', text:dragonLine },
+
+    // Apply war results to map and lysara state
+    { type:'update', updates:{
+        lysara:{ dragons:dragonCount },
+        map:{
+          ...gs.map,
+          midlands:    northWinner,
+          storrundBay: eastWinner === 'loyalists' ? 'loyalists' : gs.map.storrundBay,
+        },
+    }},
+    { type:'log', text:`War: Midlands→${northWinner}. Bay→${eastWinner}. ${dragonCount} dragon(s).` },
+    { type:'_goto_turn5' },
+  ];
+}
+
+function buildTurn5Steps(gs) {
+  const ravenRoll    = roll(1, 6);
+  const ravenArrives = ravenRoll >= 3;
+
+  if (!ravenArrives) {
+    return [
+      { type:'update', updates:{ currentTurn:5, ravenArrived:false } },
+      { type:'system', speaker:'narrator', text:"The Barrier. Beyond it, the dead stir." },
+      { type:'show_dice', result:ravenRoll, threshold:3 },
+      { type:'log',
+        text:`Turn 5 — Raven roll: ${ravenRoll} → lost`,
+        dice:{ turn:5, purpose:'raven delivery', result:ravenRoll } },
+      { type:'system', speaker:'narrator', text:`[RAVEN ROLL: ${ravenRoll}] The raven never came.` },
+      { type:'line', speaker:'narrator',
+        text:"The raven never came. The factions never knew. The Pale Walkers crossed the Barrier at dawn." },
+      { type:'log', text:"The raven was lost. No warning reached the factions." },
+      { type:'_end_game', ending:'fall' },
+    ];
+  }
+
+  return [
+    { type:'update', updates:{ currentTurn:5, ravenArrived:true } },
+    { type:'system', speaker:'narrator',
+      text:"The Barrier shudders. Corwin Frost sends every raven he has." },
+    { type:'show_dice', result:ravenRoll, threshold:3 },
+    { type:'log',
+      text:`Turn 5 — Raven roll: ${ravenRoll} → arrived`,
+      dice:{ turn:5, purpose:'raven delivery', result:ravenRoll } },
+    { type:'system', speaker:'narrator', text:`[RAVEN ROLL: ${ravenRoll}] The raven arrives at every court.` },
+    { type:'line', speaker:'corwin',
+      text:"The dead don't care who sits your throne. Send everyone. Send them now." },
+    { type:'choice', options:[
+      { label:'UNITE THE FACTIONS',  value:'unite'  },
+      { label:'IGNORE THE WARNING',  value:'ignore' },
+    ]},
+  ];
+}
+
+// Called after player picks Unite or Ignore in Turn 5
+function buildTurn5OutcomeSteps(gs, action) {
+  if (action === 'ignore') {
+    return [
+      { type:'update', updates:{ allianceFormed:false } },
+      { type:'system', speaker:'narrator',
+        text:"The factions chose their feuds over the dead." },
+      { type:'log', text:"The warning was ignored. The Pale Walkers came unopposed." },
+      { type:'_end_game', ending:'fall' },
+    ];
+  }
+
+  // Unite: roll for alliance success
+  const allianceRoll = roll(1, 6);
+  const allianceFormed = allianceRoll >= 4;
+  const dragons = gs.lysara.dragons;
+
+  let ending;
+  if (allianceFormed && dragons >= 2) ending = 'victory';
+  else if (allianceFormed)            ending = 'pyrrhic';
+  else                                ending = 'fall';
+
+  return [
+    { type:'show_dice', result:allianceRoll, threshold:4 },
+    { type:'log',
+      text:`Turn 5 — Alliance roll: ${allianceRoll} → ${allianceFormed?'formed':'failed'}`,
+      dice:{ turn:5, purpose:'alliance formation', result:allianceRoll } },
+    { type:'system', speaker:'narrator', text:`[ALLIANCE ROLL: ${allianceRoll}]` },
+    { type:'update', updates:{ allianceFormed } },
+    allianceFormed
+      ? { type:'line', speaker:'narrator',
+          text: dragons >= 2
+            ? "The banners united. Dragonfire met the dead at the Barrier. The living held."
+            : "The banners united — but the dragons were few. They held, barely." }
+      : { type:'line', speaker:'narrator',
+          text:"The factions argued until the dead were already through the gate." },
+    { type:'log', text:`Alliance: ${allianceFormed?'formed':'failed'}. Dragons: ${dragons}. Ending: ${ending}.` },
+    { type:'_end_game', ending },
+  ];
+}
+
+// Build the ending sequence given a terminal state
+function buildEndingSteps(gs, ending) {
+  const text = {
+    victory: "The factions united beneath dragonfire. The Barrier held. Valdrun endured — scarred, but whole. The Fractured Crown sat empty for a season. No one rushed to claim it.",
+    pyrrhic: "They fought together, barely. The Barrier cracked but did not fall. Half the armies perished. The survivors argued over the ashes. History does not record who sat the Fractured Crown. It no longer mattered.",
+    fall:    "The Pale Walkers crossed the Barrier. The factions were still fighting each other when the cold came. The chronicler's pen froze mid-sentence. This is where the record ends.",
+  };
+
+  return [
+    { type:'update', updates:{ ending } },
+    { type:'system', speaker:'narrator', text:`ENDING: ${ending.toUpperCase()}` },
+    { type:'line', speaker:'narrator', text:text[ending] },
+    { type:'system', speaker:'narrator', text:`Playthrough #${gs.playthroughId} complete. The Chronicle is written.` },
+    { type:'end' },
+  ];
+}
+
+// ================================================================
+// COMPONENTS
+// ================================================================
+
+// ----------------------------------------------------------------
+// NPC PORTRAIT — 64×64 SVG silhouettes (PRD §6)
+// One distinguishing feature per character, faction-colored fills.
+// ----------------------------------------------------------------
+function NpcPortrait({ character }) {
+  const info = NPC[character] || NPC.narrator;
+  const c = info.color;
+
+  const portraits = {
+    // Crown: rounded head + three-point crown
+    crown: (
+      <svg width="64" height="64" viewBox="0 0 64 64">
+        <ellipse cx="32" cy="57" rx="24" ry="13" fill={c} opacity="0.85"/>
+        <circle  cx="32" cy="31" r="15"  fill={c}/>
+        <polygon points="19,23 23,13 28,21 32,9 36,21 41,13 45,23"
+                 fill={c} stroke="#ffd700" strokeWidth="1.5" strokeLinejoin="round"/>
+        <circle cx="27" cy="30" r="2" fill="#0a0a1e"/>
+        <circle cx="37" cy="30" r="2" fill="#0a0a1e"/>
+      </svg>
+    ),
+    // Collar: head + textured fur/armour collar
+    collar: (
+      <svg width="64" height="64" viewBox="0 0 64 64">
+        <ellipse cx="32" cy="57" rx="24" ry="13" fill={c} opacity="0.85"/>
+        <path d="M11,53 Q21,42 32,44 Q43,42 53,53 L53,64 L11,64Z" fill={c} opacity="0.7"/>
+        <path d="M15,51 Q23,41 32,43 Q41,41 49,51" stroke="#d4c090" strokeWidth="1.8" fill="none"/>
+        <circle cx="32" cy="30" r="15" fill={c}/>
+        <circle cx="27" cy="29" r="2" fill="#0a0a1e"/>
+        <circle cx="37" cy="29" r="2" fill="#0a0a1e"/>
+      </svg>
+    ),
+    // Long hair: flowing hair down both sides
+    longhair: (
+      <svg width="64" height="64" viewBox="0 0 64 64">
+        <ellipse cx="32" cy="57" rx="24" ry="13" fill={c} opacity="0.85"/>
+        <path d="M17,27 Q12,46 15,62 Q21,56 23,48 L32,64 L41,48 Q43,56 49,62 Q52,46 47,27 Q40,17 32,17 Q24,17 17,27Z"
+              fill={c} opacity="0.8"/>
+        <circle cx="32" cy="30" r="14" fill={c}/>
+        <circle cx="27" cy="29" r="2" fill="#0a0a1e"/>
+        <circle cx="37" cy="29" r="2" fill="#0a0a1e"/>
+      </svg>
+    ),
+    // Short: compact figure — Halric's slight stature
+    short: (
+      <svg width="64" height="64" viewBox="0 0 64 64">
+        <ellipse cx="32" cy="59" rx="20" ry="11" fill={c} opacity="0.85"/>
+        <circle  cx="32" cy="38" r="15" fill={c}/>
+        <circle cx="27" cy="37" r="2" fill="#0a0a1e"/>
+        <circle cx="37" cy="37" r="2" fill="#0a0a1e"/>
+        <path d="M28,44 Q32,49 36,44" stroke="#0a0a1e" strokeWidth="1.5" fill="none"/>
+      </svg>
+    ),
+    // Goatee: pointed chin hair — Aldren the whisperer
+    goatee: (
+      <svg width="64" height="64" viewBox="0 0 64 64">
+        <ellipse cx="32" cy="57" rx="24" ry="13" fill={c} opacity="0.85"/>
+        <circle  cx="32" cy="30" r="15" fill={c}/>
+        <path d="M28,43 Q30,54 32,58 Q34,54 36,43" fill={c} stroke="#0a1e0a" strokeWidth="0.5"/>
+        <circle cx="27" cy="29" r="2" fill="#0a0a1e"/>
+        <circle cx="37" cy="29" r="2" fill="#0a0a1e"/>
+      </svg>
+    ),
+    // Hood: cloaked figure — Corwin Frost of the Barrier Watch
+    hood: (
+      <svg width="64" height="64" viewBox="0 0 64 64">
+        <ellipse cx="32" cy="57" rx="24" ry="13" fill={c} opacity="0.85"/>
+        <path d="M8,42 Q16,28 32,26 Q48,28 56,42 L56,64 L8,64Z" fill={c} opacity="0.8"/>
+        <path d="M16,29 Q18,18 32,16 Q46,18 48,29 Q40,21 32,21 Q24,21 16,29Z" fill="#060614"/>
+        <circle cx="27" cy="30" r="2.5" fill="#a8d8ea" opacity="0.9"/>
+        <circle cx="37" cy="30" r="2.5" fill="#a8d8ea" opacity="0.9"/>
+      </svg>
+    ),
+    // Scroll: narrator/chronicler — quill and parchment detail
+    scroll: (
+      <svg width="64" height="64" viewBox="0 0 64 64">
+        <ellipse cx="32" cy="57" rx="24" ry="13" fill={c} opacity="0.7"/>
+        <circle  cx="32" cy="30" r="15" fill={c}/>
+        <rect x="38" y="38" width="9" height="15" rx="2" fill="#f5e6c8" stroke="#9a7830" strokeWidth="1"/>
+        <line x1="40" y1="44" x2="45" y2="44" stroke="#9a7830" strokeWidth="1"/>
+        <line x1="40" y1="48" x2="45" y2="48" stroke="#9a7830" strokeWidth="1"/>
+        <circle cx="27" cy="29" r="2" fill="#0a0a1e"/>
+        <circle cx="37" cy="29" r="2" fill="#0a0a1e"/>
+      </svg>
+    ),
+  };
+
+  return portraits[info.portrait] ?? portraits.scroll;
+}
+
+// ----------------------------------------------------------------
+// VALDRUN MAP — SVG with faction-color-bound regions (PRD §6)
+// CSS transitions on fill provide smooth Turn 4 territory animation.
+// ----------------------------------------------------------------
+function ValdrunMap({ mapState, turn5 }) {
+  const col = (k) => FACTION_COLOR[mapState[k]] ?? FACTION_COLOR.neutral;
+
+  return (
+    <svg viewBox="0 0 420 320" width="100%" height="100%"
+         style={{ maxHeight:'100%', display:'block' }}>
+
+      {/* Ocean background */}
+      <rect width="420" height="320" fill="#081420"/>
+
+      {/* THE BARRIER — top strip, glows in Turn 5 */}
+      <rect x="28" y="10" width="264" height="18" rx="3"
+            fill={col('barrier')}
+            stroke="#a8d8ea" strokeWidth={turn5 ? 2 : 0.5}
+            className={turn5 ? 'barrier-glow' : ''}
+            style={{ transition:'fill 0.6s' }}/>
+      <text x="160" y="23" textAnchor="middle"
+            fill="#a8d8ea" fontSize="8" fontFamily="monospace" fontWeight="bold">THE BARRIER</text>
+
+      {/* PALE WALKERS indicator in Turn 5 */}
+      {turn5 && (
+        <text x="160" y="8" textAnchor="middle"
+              fill="#a8d8ea" fontSize="7" fontFamily="monospace" opacity="0.7">
+          ↑ PALE WALKERS ADVANCE ↑
+        </text>
+      )}
+
+      {/* THE NORTH */}
+      <polygon points="28,30 292,30 272,88 182,98 82,93 28,78"
+               fill={col('north')} stroke="#0f3460" strokeWidth="1.5" className="region"/>
+      <text x="158" y="66" textAnchor="middle"
+            fill="#e0e0e0" fontSize="10" fontFamily="monospace">THE NORTH</text>
+      <text x="158" y="79" textAnchor="middle"
+            fill="#e0e0e0" fontSize="8" fontFamily="monospace" opacity="0.6">(Ashward)</text>
+
+      {/* THE MIDLANDS — contested, changes in Turn 4 */}
+      <polygon points="82,93 182,98 272,88 262,148 222,162 132,160 72,148"
+               fill={col('midlands')} stroke="#0f3460" strokeWidth="1.5" className="region"/>
+      <text x="170" y="132" textAnchor="middle"
+            fill="#e0e0e0" fontSize="10" fontFamily="monospace">MIDLANDS</text>
+      <text x="170" y="144" textAnchor="middle"
+            fill="#e0e0e0" fontSize="8" fontFamily="monospace" opacity="0.6">
+        ({mapState.midlands === 'contested' ? 'contested' :
+          mapState.midlands === 'ashward' ? 'Ashward' : 'Golmere'})
+      </text>
+
+      {/* THE WESTERLANDS */}
+      <polygon points="28,78 82,93 72,148 52,182 18,170 12,120"
+               fill={col('westerlands')} stroke="#0f3460" strokeWidth="1.5" className="region"/>
+      <text x="44" y="136" textAnchor="middle"
+            fill="#1a1a1e" fontSize="8" fontFamily="monospace" fontWeight="bold">WEST</text>
+
+      {/* CROWNHARBOUR — seat of power dot */}
+      <circle cx="176" cy="182" r="13"
+              fill={col('crownharbour')} stroke="#ffd700" strokeWidth="2"
+              className="region"/>
+      <text x="176" y="202" textAnchor="middle"
+            fill="#ffd700" fontSize="8" fontFamily="monospace">CROWNHARBOUR</text>
+
+      {/* STORRUND BAY */}
+      <polygon points="222,162 318,156 336,202 304,232 242,228 202,202"
+               fill={col('storrundBay')} stroke="#0f3460" strokeWidth="1.5" className="region"/>
+      <text x="268" y="196" textAnchor="middle"
+            fill="#e0e0e0" fontSize="9" fontFamily="monospace">STORRUND BAY</text>
+
+      {/* South coast region */}
+      <polygon points="132,160 222,162 202,202 242,228 214,252 142,250 112,222 112,188"
+               fill={col('crownharbour')} opacity="0.55" stroke="#0f3460" strokeWidth="1" className="region"/>
+
+      {/* THE EMBER ISLES — separated island */}
+      <ellipse cx="370" cy="218" rx="30" ry="48"
+               fill={col('emberIsles')} stroke="#0f3460" strokeWidth="1.5" className="region"/>
+      <text x="370" y="214" textAnchor="middle"
+            fill="#e0e0e0" fontSize="8" fontFamily="monospace">EMBER</text>
+      <text x="370" y="226" textAnchor="middle"
+            fill="#e0e0e0" fontSize="8" fontFamily="monospace">ISLES</text>
+
+      {/* Dragon count badge — visible after Turn 4 */}
+      {mapState._dragonsSet && (
+        <g>
+          <circle cx="370" cy="244" r="10" fill="#cc0000" stroke="#ff6666" strokeWidth="1"/>
+          <text x="370" y="248" textAnchor="middle"
+                fill="#fff" fontSize="9" fontFamily="monospace" fontWeight="bold">
+            {'🐉'.repeat(0) /* emoji doesn't render in SVG text cleanly */}
+          </text>
+        </g>
+      )}
+
+      {/* Legend */}
+      <rect x="8" y="258" width="128" height="58" rx="3"
+            fill="#16213e" stroke="#0f3460" strokeWidth="1" opacity="0.9"/>
+      <text x="14" y="272" fill="#00ffff" fontSize="8" fontFamily="monospace">FACTION CONTROL</text>
+      {[
+        { k:'ashward',   label:'Ashward'   },
+        { k:'golmere',   label:'Golmere'   },
+        { k:'storrund',  label:'Storrund'  },
+        { k:'vaelthorne',label:'Vaelthorne'},
+      ].map((f,i) => (
+        <g key={f.k}>
+          <rect x="14" y={279+i*11} width="8" height="8" fill={FACTION_COLOR[f.k]}/>
+          <text x="26" y={287+i*11} fill="#e0e0e0" fontSize="8" fontFamily="monospace">{f.label}</text>
+        </g>
+      ))}
+
+      {/* Dragons counter bottom-right */}
+      <text x="408" y="314" textAnchor="end"
+            fill="#cc0000" fontSize="10" fontFamily="monospace">
+        {mapState._dragons > 0 ? `🐉×${mapState._dragons}` : ''}
+      </text>
+    </svg>
+  );
+}
+
+// ----------------------------------------------------------------
+// DICE ANIMATION (PRD §6)
+// Phase 1: shaking cube emoji (1 s)
+// Phase 2: colored hitsplat circle with number (2 s, then fades)
+// ----------------------------------------------------------------
+function DiceAnimation({ animating, result, isGood }) {
+  if (!animating && result === null) return null;
+
+  return (
+    <div style={{
+      position:'fixed', inset:0,
+      display:'flex', alignItems:'center', justifyContent:'center',
+      zIndex:900, pointerEvents:'none',
+    }}>
+      {animating ? (
+        <div className="dice-shake" style={{ fontSize:72, userSelect:'none', lineHeight:1 }}>🎲</div>
+      ) : result !== null ? (
+        <div className="hitsplat" style={{
+          width:88, height:88, borderRadius:'50%',
+          backgroundColor: isGood ? '#1a5c1a' : '#6e0000',
+          border:`3px solid ${isGood ? '#00ee00' : '#ee0000'}`,
+          display:'flex', flexDirection:'column',
+          alignItems:'center', justifyContent:'center',
+          boxShadow: isGood
+            ? '0 0 24px rgba(0,255,0,0.5)'
+            : '0 0 24px rgba(255,0,0,0.5)',
+        }}>
+          <span style={{ color:'#fff', fontSize:30, fontWeight:'bold', fontFamily:'monospace', lineHeight:1 }}>
+            {result}
+          </span>
+          <span style={{ color: isGood ? '#90ee90' : '#ffb6b6', fontSize:9, fontFamily:'monospace', marginTop:2 }}>
+            {isGood ? 'GOOD' : 'BAD'}
+          </span>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------
+// TOP BAR
+// ----------------------------------------------------------------
+function TopBar({ currentTurn, onAbout, onSource, onChronicle }) {
+  const LABELS = {
+    0:'', 1:"TURN 1 / 5 — THE KING'S SUMMONS",
+    2:"TURN 2 / 5 — COURT OF WHISPERS",
+    3:"TURN 3 / 5 — THE BETRAYAL",
+    4:"TURN 4 / 5 — WAR OF FIVE CLAIMANTS",
+    5:"TURN 5 / 5 — BEYOND THE BARRIER",
+    6:"CHRONICLE COMPLETE",
+  };
+
+  return (
+    <div style={{
+      height:48, flexShrink:0, backgroundColor:'#16213e',
+      borderBottom:'2px solid #0f3460',
+      display:'flex', alignItems:'center', justifyContent:'space-between',
+      padding:'0 16px',
+    }}>
+      <span style={{ color:'#ffd700', fontFamily:'monospace', fontWeight:'bold',
+                     fontSize:16, letterSpacing:2, textTransform:'uppercase' }}>
+        THE FRACTURED CROWN
+      </span>
+      {currentTurn > 0 && (
+        <span style={{ color:'#00ffff', fontFamily:'monospace', fontSize:11, letterSpacing:1 }}>
+          {LABELS[currentTurn] || ''}
+        </span>
+      )}
+      <div style={{ display:'flex', gap:8 }}>
+        {[
+          { label:'SOURCE', fn:onSource },
+          { label:'LOG',    fn:onChronicle },
+          { label:'ABOUT',  fn:onAbout },
+        ].map(b => (
+          <button key={b.label} onClick={b.fn} style={{
+            background:'transparent', border:'1px solid #0f3460',
+            color:'#e0e0e0', fontFamily:'monospace', fontSize:11,
+            padding:'3px 8px', cursor:'pointer', letterSpacing:1,
+            transition:'border-color 0.12s',
+          }}
+          onMouseEnter={e=>e.currentTarget.style.borderColor='#00ffff'}
+          onMouseLeave={e=>e.currentTarget.style.borderColor='#0f3460'}>
+            {b.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------
+// MAIN VIEWPORT
+// Turns 0–3, 6: colored scene background + location text
+// Turns 4–5:    SVG map of Valdrun
+// ----------------------------------------------------------------
+function MainViewport({ currentTurn, mapState, aldricLocation }) {
+  const SCENES = {
+    0: { bg:'#080814', loc:'',              sub:'' },
+    1: { bg:'#18283a', loc:'GREYHOLT',      sub:'The frozen great hall of House Ashward.' },
+    2: { bg:'#281838', loc:'CROWNHARBOUR',  sub:'The throne room. Gilded. Treacherous.' },
+    3: { bg:'#180a0a', loc:'CROWNHARBOUR',  sub:'The crown changes hands. Iron in the air.' },
+    6: { bg:'#0a1808', loc:'CHRONICLE LOG', sub:'The record is complete.' },
+  };
+
+  const showMap = currentTurn === 4 || currentTurn === 5;
+
+  if (showMap) {
+    return (
+      <div style={{ flex:1, backgroundColor:'#081420', display:'flex',
+                    alignItems:'center', justifyContent:'center', overflow:'hidden', position:'relative' }}>
+        <ValdrunMap mapState={mapState} turn5={currentTurn === 5}/>
+        {/* Dragon count badge overlay */}
+        {mapState._dragons > 0 && (
+          <div style={{
+            position:'absolute', bottom:12, right:12,
+            backgroundColor:'#1a0a0a', border:'1px solid #cc0000',
+            padding:'4px 10px', fontFamily:'monospace', fontSize:13,
+            color:'#cc0000', letterSpacing:1,
+          }}>
+            {mapState._dragons} DRAGON{mapState._dragons > 1 ? 'S' : ''} AIRBORNE
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  const s = SCENES[currentTurn] ?? SCENES[1];
+
+  return (
+    <div style={{
+      flex:1, backgroundColor:s.bg, display:'flex', flexDirection:'column',
+      alignItems:'center', justifyContent:'center', position:'relative', overflow:'hidden',
+    }}>
+      {/* Subtle grid lines */}
+      <svg style={{ position:'absolute', inset:0, width:'100%', height:'100%', opacity:0.04 }}
+           viewBox="0 0 400 200" preserveAspectRatio="xMidYMid slice">
+        {Array.from({length:21},(_,i)=>(
+          <line key={`v${i}`} x1={i*20} y1="0" x2={i*20} y2="200" stroke="#4a6090" strokeWidth="1"/>
+        ))}
+        {Array.from({length:11},(_,i)=>(
+          <line key={`h${i}`} x1="0" y1={i*20} x2="400" y2={i*20} stroke="#4a6090" strokeWidth="1"/>
+        ))}
+      </svg>
+
+      {currentTurn === 0 ? (
+        // Title screen
+        <div style={{ textAlign:'center', position:'relative', zIndex:1 }}>
+          <div className="crown-shimmer" style={{
+            color:'#ffd700', fontFamily:'monospace', fontWeight:'bold',
+            fontSize:'clamp(24px,4vw,40px)', letterSpacing:4, textTransform:'uppercase',
+            marginBottom:12,
+          }}>THE FRACTURED CROWN</div>
+          <div style={{ color:'#e0e0e0', fontFamily:'monospace', fontSize:14,
+                        letterSpacing:3, marginBottom:6 }}>
+            A CHRONICLE OF VALDRUN
+          </div>
+          <div style={{ color:'#808080', fontFamily:'monospace', fontSize:11,
+                        letterSpacing:1, marginBottom:36 }}>
+            The dice decide. The chronicler witnesses.
+          </div>
+          <div style={{ color:'#00ffff', fontFamily:'monospace', fontSize:11,
+                        letterSpacing:2, opacity:0.8 }}>
+            [ CLICK ANYWHERE TO BEGIN ]
+          </div>
+        </div>
+      ) : (
+        // Scene label
+        <div style={{ textAlign:'center', position:'relative', zIndex:1 }}>
+          {s.loc && (
+            <>
+              <div style={{ color:'#00ffff', fontFamily:'monospace', fontSize:10,
+                            letterSpacing:3, marginBottom:8, opacity:0.7 }}>LOCATION</div>
+              <div style={{ color:'#e0e0e0', fontFamily:'monospace', fontWeight:'bold',
+                            fontSize:'clamp(16px,2.5vw,24px)', letterSpacing:3,
+                            textTransform:'uppercase', marginBottom:8 }}>
+                {s.loc}
+              </div>
+              <div style={{ color:'#606060', fontFamily:'monospace', fontSize:11,
+                            fontStyle:'italic', letterSpacing:1 }}>
+                {s.sub}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Aldric status badge for turns 2+ */}
+      {currentTurn >= 2 && aldricLocation && (
+        <div style={{
+          position:'absolute', top:12, right:14,
+          backgroundColor:'#16213e', border:'1px solid #0f3460',
+          padding:'5px 10px', fontFamily:'monospace', fontSize:10, color:'#e0e0e0',
+        }}>
+          <div style={{ color:'#808080', marginBottom:2 }}>ALDRIC ASHWARD</div>
+          <div style={{ color: aldricLocation === 'Greyholt' ? '#808080' : '#ffd700' }}>
+            {aldricLocation}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------
+// DIALOGUE PANEL (RuneScape chat box — PRD §6)
+// Shows: portrait | name + typewriter text
+// Also handles choice buttons and NPC-select interface.
+// ----------------------------------------------------------------
+function DialoguePanel({
+  currentLine, displayedText, isTyping,
+  waitingForInput, choices, npcSelectPhase,
+  onAdvance, onChoice, onNpcSelect,
+  chronicleLog, gameOver, onReplay,
+}) {
+  const speakerInfo = currentLine ? (NPC[currentLine.speaker] ?? { name: currentLine.speaker, color:'#e0e0e0', portrait:'scroll' }) : null;
+
+  // Game-over state: show chronicle in panel with Play Again button
+  if (gameOver) {
+    return (
+      <div style={{
+        height:200, flexShrink:0, backgroundColor:'#08080e',
+        borderTop:'2px solid #0f3460', display:'flex', flexDirection:'column',
+        fontFamily:'monospace',
+      }}>
+        <div className="scrollable" style={{ flex:1, padding:'10px 16px', overflowY:'auto' }}>
+          {chronicleLog.map((e,i) => (
+            <div key={i} style={{ color:'#00ffff', fontSize:11, marginBottom:4 }}>{e}</div>
+          ))}
+        </div>
+        <div style={{
+          padding:'8px 16px', borderTop:'1px solid #0f3460',
+          display:'flex', justifyContent:'flex-end',
+        }}>
+          <button onClick={onReplay} style={{
+            backgroundColor:'#e94560', border:'1px solid #0f3460',
+            color:'#fff', fontFamily:'monospace', fontSize:13,
+            padding:'6px 24px', cursor:'pointer', letterSpacing:2, fontWeight:'bold',
+            transition:'background 0.12s',
+          }}
+          onMouseEnter={e=>e.currentTarget.style.background='#ff6b6b'}
+          onMouseLeave={e=>e.currentTarget.style.background='#e94560'}>
+            ▶ PLAY AGAIN
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const canClick = (isTyping) || (waitingForInput && choices.length === 0 && !npcSelectPhase);
+
+  return (
+    <div style={{
+      height:200, flexShrink:0, backgroundColor:'#08080e',
+      borderTop:'2px solid #0f3460', display:'flex', flexDirection:'column',
+      cursor: canClick ? 'pointer' : 'default',
+    }}
+    onClick={() => { if (canClick) onAdvance(); }}>
+
+      {/* Portrait + dialogue row */}
+      <div style={{ flex:1, display:'flex', overflow:'hidden', borderBottom:'1px solid #0f3460', minHeight:0 }}>
+
+        {/* Portrait column */}
+        {currentLine && (
+          <div style={{
+            width:90, minWidth:90, backgroundColor:'#16213e',
+            borderRight:'1px solid #0f3460',
+            display:'flex', flexDirection:'column',
+            alignItems:'center', justifyContent:'center', padding:8,
+          }}>
+            <NpcPortrait character={currentLine.speaker}/>
+            <div style={{
+              color: speakerInfo?.color ?? '#e0e0e0',
+              fontFamily:'monospace', fontSize:9,
+              textAlign:'center', marginTop:4, lineHeight:1.3,
+            }}>
+              {speakerInfo?.name ?? ''}
+            </div>
+          </div>
+        )}
+
+        {/* Text column */}
+        <div style={{ flex:1, padding:'12px 16px', overflowY:'auto' }}>
+
+          {/* NPC selection interface — Turn 2 */}
+          {npcSelectPhase ? (
+            <div>
+              <div style={{ color:'#00ffff', fontFamily:'monospace', fontSize:11,
+                            letterSpacing:1, marginBottom:12 }}>
+                TIME IS SHORT. CHOOSE TWO NPCS TO CONSULT: ({npcSelectPhase.selected.length}/2 selected)
+              </div>
+              <div style={{ display:'flex', gap:12, flexWrap:'wrap' }}>
+                {npcSelectPhase.npcs.map(k => {
+                  const info = NPC[k];
+                  const sel  = npcSelectPhase.selected.includes(k);
+                  const dis  = !sel && npcSelectPhase.selected.length >= 2;
+                  return (
+                    <button key={k} className="npc-btn"
+                      onClick={e => { e.stopPropagation(); if (!dis) onNpcSelect(k); }}
+                      style={{
+                        backgroundColor: sel ? '#1a3a1a' : '#16213e',
+                        border:`2px solid ${sel ? '#00ff00' : '#0f3460'}`,
+                        color: sel ? '#00ff00' : dis ? '#444' : '#e0e0e0',
+                        fontFamily:'monospace', fontSize:12, padding:'6px 14px',
+                        cursor: dis ? 'not-allowed' : 'pointer',
+                        display:'flex', alignItems:'center', gap:8,
+                        opacity: dis ? 0.5 : 1,
+                      }}>
+                      <div style={{ transform:'scale(0.65)', transformOrigin:'center', width:42, height:42,
+                                    display:'flex', alignItems:'center', justifyContent:'center' }}>
+                        <NpcPortrait character={k}/>
+                      </div>
+                      {info?.name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+          ) : currentLine ? (
+            // Typewriter dialogue
+            <div>
+              <div style={{ color: speakerInfo?.color ?? '#e0e0e0',
+                            fontFamily:'monospace', fontSize:11,
+                            letterSpacing:1, marginBottom:6, textTransform:'uppercase' }}>
+                {speakerInfo?.name ?? currentLine.speaker}
+              </div>
+              <div style={{ color: currentLine.isSystem ? '#00ffff' : '#ffff00',
+                            fontFamily:'monospace', fontSize:14, lineHeight:1.55 }}
+                   className={isTyping ? 'cursor' : ''}>
+                {displayedText}
+              </div>
+              {waitingForInput && !isTyping && choices.length === 0 && (
+                <div style={{ color:'#555', fontFamily:'monospace', fontSize:10,
+                              marginTop:8, letterSpacing:1 }}>
+                  ▼ click to continue
+                </div>
+              )}
+            </div>
+          ) : (
+            <div style={{ color:'#333', fontFamily:'monospace', fontSize:12 }}>...</div>
+          )}
+        </div>
+      </div>
+
+      {/* Choice buttons row */}
+      {choices.length > 0 && (
+        <div style={{ padding:'8px 16px', display:'flex', gap:10,
+                      alignItems:'center', flexWrap:'wrap', flexShrink:0 }}>
+          <span style={{ color:'#00ffff', fontFamily:'monospace', fontSize:10,
+                         letterSpacing:1, marginRight:4 }}>CHOOSE:</span>
+          {choices.map(ch => (
+            <button key={ch.value} className="choice-btn"
+              onClick={e => { e.stopPropagation(); onChoice(ch.value); }}
+              style={{
+                backgroundColor:'#1a0812', border:'2px solid #e94560',
+                color:'#e0e0e0', fontFamily:'monospace', fontSize:13,
+                padding:'5px 14px', cursor:'pointer', letterSpacing:1, fontWeight:'bold',
+              }}>
+              {ch.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------
+// SOURCE CODE OVERLAY — slide in from right (PRD §8)
+// ----------------------------------------------------------------
+function SourceCodeOverlay({ visible, currentTurn, onClose }) {
+  if (!visible) return null;
+  const code = SOURCE[currentTurn] ?? SOURCE[0];
+  return (
+    <div className="slide-right" style={{
+      position:'fixed', top:0, right:0, width:440, height:'100vh',
+      backgroundColor:'#060606', borderLeft:'2px solid #00ff00',
+      zIndex:500, display:'flex', flexDirection:'column', fontFamily:'monospace',
+    }}>
+      <div style={{
+        padding:'10px 14px', borderBottom:'1px solid #00ff00',
+        display:'flex', justifyContent:'space-between', alignItems:'center',
+      }}>
+        <span style={{ color:'#00ff00', fontSize:11, letterSpacing:2 }}>
+          // SOURCE CODE — TURN {currentTurn || '0'}
+        </span>
+        <button onClick={onClose} style={{
+          background:'none', border:'none', color:'#00ff00',
+          cursor:'pointer', fontSize:18, lineHeight:1 }}>✕</button>
+      </div>
+      <div className="scrollable" style={{ flex:1, padding:16, overflowY:'auto' }}>
+        <pre style={{
+          color:'#00ff00', fontSize:12, lineHeight:1.65,
+          whiteSpace:'pre-wrap', wordBreak:'break-word',
+        }}>{code}</pre>
+      </div>
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------
+// CHRONICLE LOG OVERLAY — slide in from bottom (PRD §5 + §8)
+// ----------------------------------------------------------------
+function ChronicleOverlay({ visible, gs, onClose }) {
+  if (!visible) return null;
+  const s = gs;
+
+  const aldricStatus =
+    !s.aldric.alive              ? 'DEAD'
+    : s.aldric.status==='imprisoned'? 'IMPRISONED'
+    : s.aldric.location==='Greyholt'? 'STAYED NORTH'
+    : s.aldric.location==='Fled'    ? 'FLED'
+    : 'ALIVE IN CROWNHARBOUR';
+
+  const secretStatus =
+    s.aldric.knows_secret ? 'DISCOVERED'
+    : s.aldric.suspects   ? 'SUSPECTED'
+    : 'UNKNOWN';
+
+  const aldrenStatus =
+    !s.aldren.consulted       ? 'NEVER CONSULTED'
+    : s.aldren.betrayed===true? 'BETRAYED ALDRIC'
+    : s.aldren.betrayed===false?'HELPED ALDRIC'
+    : 'CONSULTED (INFORMATION WITHHELD)';
+
+  const midlandsLabel =
+    s.map.midlands==='ashward'  ? 'HOUSE ASHWARD'
+    : s.map.midlands==='golmere'? 'HOUSE GOLMERE'
+    : 'CONTESTED';
+
+  const bayLabel =
+    s.map.storrundBay==='loyalists'? 'STORRUND LOYALISTS' : 'CROWN FORCES';
+
+  const endingLabel =
+    s.ending==='victory'? 'VICTORY'
+    : s.ending==='pyrrhic'? 'PYRRHIC VICTORY'
+    : s.ending==='fall' ? 'THE FALL'
+    : 'ONGOING';
+
+  const diceRows = s.diceLog.map(d =>
+    `  Turn ${d.turn}: ${d.purpose.padEnd(28)} → ${d.result}  (${d.result >= 4 ? 'good' : 'bad'})`
+  ).join('\n');
+
+  const chronicle = `--- CHRONICLE OF VALDRUN — PLAYTHROUGH #${s.playthroughId} ---
+
+Aldric Ashward:      ${aldricStatus}
+Maegor Storrund:     ${s.maegor.sitsThrone ? 'SITS THE FRACTURED CROWN' : 'NEVER CROWNED'}
+The Secret:          ${secretStatus}
+Aldren Thorne:       ${aldrenStatus}
+War Outcome:         Midlands held by ${midlandsLabel}. Coast: ${bayLabel}.
+Dragons Hatched:     ${s.lysara.dragons || 0}
+The Raven:           ${s.ravenArrived ? 'ARRIVED' : 'LOST OR NEVER SENT'}
+Alliance:            ${s.allianceFormed ? 'FORMED' : s.ravenArrived ? 'REFUSED OR FAILED' : 'NEVER ATTEMPTED'}
+Ending:              ${endingLabel}
+
+${diceRows.length > 0 ? '--- DICE ROLLS ---\n' + diceRows + '\n' : '--- NO DICE ROLLED YET ---\n'}
+"History is what the dice decide. Play again to write a different truth."`;
+
+  return (
+    <div className="slide-up" style={{
+      position:'fixed', bottom:0, left:0, right:0, height:'58vh',
+      backgroundColor:'#08080e', borderTop:'2px solid #00ffff',
+      zIndex:500, display:'flex', flexDirection:'column', fontFamily:'monospace',
+    }}>
+      <div style={{
+        padding:'10px 14px', borderBottom:'1px solid #00ffff',
+        display:'flex', justifyContent:'space-between', alignItems:'center',
+      }}>
+        <span style={{ color:'#00ffff', fontSize:12, letterSpacing:2 }}>
+          CHRONICLE OF VALDRUN — PLAYTHROUGH #{s.playthroughId}
+        </span>
+        <button onClick={onClose} style={{
+          background:'none', border:'none', color:'#00ffff',
+          cursor:'pointer', fontSize:18, lineHeight:1 }}>✕</button>
+      </div>
+      <div className="scrollable" style={{ flex:1, padding:'14px 18px', overflowY:'auto' }}>
+        <pre style={{ color:'#e0e0e0', fontSize:12, lineHeight:1.9, whiteSpace:'pre-wrap' }}>
+          {chronicle}
+        </pre>
+      </div>
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------
+// ABOUT OVERLAY (PRD §9)
+// ----------------------------------------------------------------
+function AboutOverlay({ visible, onClose }) {
+  if (!visible) return null;
+
+  const aboutText = `CONCEPT
+
+"The Fractured Crown" is an interactive performance script created
+for Art of the Web, Section 3, Assignment 2.
+
+A browser-based quest that uses the logic of programming
+functions to drive a political drama. Each playthrough is a
+unique "performance" — the dice ensure no two runs are the same.
+
+The script is not syntactically valid code. It is a creative
+interpretation of programming logic as a performance score,
+in the tradition of Fluxus event scores and algorithmic
+choreography.
+
+HOW IT SATISFIES THE BRIEF
+
+FUNCTIONS: Every NPC interaction, battle, and plot event is
+governed by a named function with inputs, outputs, and
+conditionals. The "Source Code" panel shows these in real time.
+
+CHANCE: Visible dice rolls determine NPC honesty, battle
+outcomes, character survival, and the final state of the world.
+The same script produces different performances each time.
+
+DURATION: A single playthrough takes 3–5 minutes. The work is
+designed to be replayed.
+
+DOCUMENTATION: This site is the documentation. The Chronicle
+Log records each playthrough's unique history. The Source Code
+panel reveals the logic driving the performance.
+
+REFERENCES
+
+- VNS Matrix, CorpusFantasticaMoo (1995) — interactive text
+  world as performance art
+- Taeyoon Choi, Movement Scores (2018–19) — instructions as
+  performance scores
+- Josh Darnit, Exact Instructions Challenge (2017) — literal
+  interpretation of programmatic instructions
+- Chloe Bass, Interactions and Play (2012–14) — structured
+  audience interaction as art
+- Douglas Huebler, Secrets (1969) — documentation of unique,
+  unrepeatable events
+
+CREATED BY
+
+[Your Name]
+Art of the Web — Section 3, Assignment 2`;
+
+  return (
+    <div style={{
+      position:'fixed', inset:0, backgroundColor:'rgba(0,0,0,0.82)',
+      zIndex:600, display:'flex', alignItems:'center', justifyContent:'center',
+    }}>
+      <div className="slide-up" style={{
+        backgroundColor:'#16213e', border:'2px solid #0f3460',
+        width:'min(600px,92vw)', maxHeight:'82vh',
+        display:'flex', flexDirection:'column', fontFamily:'monospace',
+      }}>
+        <div style={{
+          padding:'12px 16px', borderBottom:'1px solid #0f3460',
+          display:'flex', justifyContent:'space-between', alignItems:'center',
+        }}>
+          <span style={{ color:'#ffd700', fontSize:14, letterSpacing:2 }}>
+            ABOUT THIS PROJECT
+          </span>
+          <button onClick={onClose} style={{
+            background:'none', border:'none', color:'#e0e0e0',
+            cursor:'pointer', fontSize:18, lineHeight:1 }}>✕</button>
+        </div>
+        <div className="scrollable" style={{ flex:1, padding:'18px 20px', overflowY:'auto' }}>
+          <pre style={{ color:'#e0e0e0', fontSize:12, lineHeight:1.8, whiteSpace:'pre-wrap' }}>
+            {aboutText}
+          </pre>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ================================================================
+// APP — root component, single useState, all handlers
+// ================================================================
+function App() {
+  // Single source of truth — per rubric: no Redux, no Context
+  const [state, setState] = React.useState(getInitialState());
+
+  // Ref for typewriter interval so it can be cleared from anywhere
+  const twRef = React.useRef(null);
+
+  // ── Typewriter effect ─────────────────────────────────────────
+  // Runs whenever a new dialogue line begins (isTyping becomes true).
+  // Increments charIndex every 30 ms until full text is revealed.
+  React.useEffect(() => {
+    if (twRef.current) clearInterval(twRef.current);
+    if (!state.isTyping || !state.currentLine) return;
+    const full = state.currentLine.text;
+    twRef.current = setInterval(() => {
+      setState(prev => {
+        if (!prev.isTyping) { clearInterval(twRef.current); return prev; }
+        const next = prev.charIndex + 1;
+        if (next >= full.length) {
+          clearInterval(twRef.current);
+          return { ...prev, charIndex: next, isTyping: false, waitingForInput: true };
+        }
+        return { ...prev, charIndex: next };
+      });
+    }, 30);
+    return () => clearInterval(twRef.current);
+  }, [state.currentLine, state.isTyping]);
+
+  // ── Dice animation sequencer ──────────────────────────────────
+  // When diceAnimating becomes true, run the 1s spin → 2s hitsplat sequence.
+  // After 3s total, resume processing the step queue.
+  React.useEffect(() => {
+    if (!state.diceAnimating) return;
+    const val = state._diceValue;
+    const good = state.diceIsGood;
+
+    const t1 = setTimeout(() => {
+      // Phase 2: hide spinner, show hitsplat
+      setState(prev => ({
+        ...prev,
+        diceAnimating: false,
+        diceResult:    val,
+        diceIsGood:    good,
+      }));
+      const t2 = setTimeout(() => {
+        // Phase 3: dismiss hitsplat, process next step
+        setState(prev => processStep({ ...prev, diceResult: null }));
+      }, 2000);
+      return () => clearTimeout(t2);
+    }, 1000);
+    return () => clearTimeout(t1);
+  }, [state.diceAnimating]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Special sentinel step handler ────────────────────────────
+  // Called from handleAdvance when processStep returns a state that has
+  // a pending sentinel (_goto_turn4, _end_game, etc.) at the front of queue.
+  // Sentinels are 'type' strings starting with '_' — they jump the game state.
+  // We handle them here rather than in processStep so we can access the full gs.
+  function consumeSentinels(s) {
+    let cur = s;
+    while (cur.stepQueue.length > 0 && cur.stepQueue[0].type?.startsWith('_')) {
+      const [step, ...rest] = cur.stepQueue;
+      if (step.type === '_goto_turn3') {
+        // Build Turn 3 steps now, with the fully-updated state (knows_secret is set)
+        const t3 = buildTurn3Steps(cur);
+        cur = processStep({ ...cur, stepQueue: t3, currentTurn: 3 });
+      } else if (step.type === '_goto_turn4') {
+        const t4 = buildTurn4Steps(cur);
+        cur = processStep({ ...cur, stepQueue: t4, currentTurn: 4 });
+      } else if (step.type === '_goto_turn5') {
+        const t5 = buildTurn5Steps(cur);
+        cur = processStep({ ...cur, stepQueue: t5, currentTurn: 5 });
+      } else if (step.type === '_skip_to_turn4') {
+        // Aldric refused in T1 — skip T2+T3, go directly to T4
+        const t4 = buildTurn4Steps(cur);
+        cur = processStep({ ...cur, stepQueue: t4, currentTurn: 4 });
+      } else if (step.type === '_end_game') {
+        const ending = buildEndingSteps(cur, step.ending);
+        cur = processStep({ ...cur, stepQueue: ending });
+      } else {
+        // Unknown sentinel — skip
+        cur = { ...cur, stepQueue: rest };
+      }
+    }
+    return cur;
+  }
+
+  // ── Advance handler ───────────────────────────────────────────
+  // Called on click (anywhere in dialogue area, or bottom bar).
+  const handleAdvance = React.useCallback(() => {
+    setState(prev => {
+      // Skip typewriter → show full text immediately
+      if (prev.isTyping && prev.currentLine) {
+        if (twRef.current) clearInterval(twRef.current);
+        return { ...prev, charIndex: prev.currentLine.text.length,
+                          isTyping: false, waitingForInput: true };
+      }
+      // Advance to next step (if not waiting for a choice or NPC select)
+      if (prev.waitingForInput && prev.choices.length === 0 && !prev.npcSelectPhase) {
+        return consumeSentinels(processStep(prev));
+      }
+      return prev;
+    });
+  }, []);
+
+  // ── Choice handler ────────────────────────────────────────────
+  // Receives the chosen value and builds the appropriate continuation steps.
+  const handleChoice = React.useCallback((value) => {
+    setState(prev => {
+      const base = { ...prev, choices: [], waitingForInput: false };
+      const turn = prev.currentTurn;
+
+      // ── Turn 1: Accept or Refuse the summons ─────────────────
+      if (turn === 1) {
+        if (value === 'refuse') {
+          const steps = [
+            { type:'line', speaker:'aldric',
+              text:"The North is where I belong. Send someone who wants power. I never did." },
+            { type:'update', updates:{ aldric:{ ...prev.aldric, location:'Greyholt' } }},
+            { type:'log', text:"Aldric refused the King's summons. He stayed in Greyholt." },
+            { type:'_skip_to_turn4' },
+          ];
+          return consumeSentinels(processStep({ ...base, stepQueue: steps }));
+        }
+        // Accept
+        const hasSuspicion = prev.aldric.suspicion;
+        const steps = [
+          { type:'line', speaker:'aldric',
+            text: hasSuspicion
+              ? "Something feels wrong... but duty calls. I'll ride at dawn."
+              : "For the realm. I'll see you in Crownharbour, Your Grace." },
+          { type:'update', updates:{ aldric:{ ...prev.aldric, location:'Crownharbour' } }},
+          { type:'log', text:`Aldric accepted the summons.${hasSuspicion?' He rode south wary.':''}` },
+        ];
+        // Continue to Turn 2
+        const t2 = buildTurn2Steps({ ...prev, aldric:{ ...prev.aldric, location:'Crownharbour' } });
+        const allSteps = [...steps, ...t2];
+        return consumeSentinels(processStep({ ...base, stepQueue: allSteps }));
+      }
+
+      // ── Turn 3: Confront / Flee / Seek Allies ─────────────────
+      if (turn === 3) {
+        const fateRoll = roll(1, 6);
+        const outcomeSteps = buildTurn3OutcomeSteps(prev, value, fateRoll);
+        // Trigger dice animation first; outcome steps run after animation
+        // We start the animation by injecting show_dice at the front
+        const steps = [
+          // show_dice step is consumed by processStep → useEffect drives animation
+          // outcome steps sit behind it, will be processed when animation ends
+          ...outcomeSteps,
+        ];
+        return consumeSentinels(processStep({ ...base, stepQueue: steps }));
+      }
+
+      // ── Turn 5: Unite or Ignore ───────────────────────────────
+      if (turn === 5) {
+        const outcomeSteps = buildTurn5OutcomeSteps(prev, value);
+        return consumeSentinels(processStep({ ...base, stepQueue: outcomeSteps }));
+      }
+
+      return base;
+    });
+  }, []);
+
+  // ── NPC select handler (Turn 2) ───────────────────────────────
+  // Accumulates selections; once count reached, builds and runs NPC dialogue.
+  const handleNpcSelect = React.useCallback((npcKey) => {
+    setState(prev => {
+      if (!prev.npcSelectPhase) return prev;
+      const phase = prev.npcSelectPhase;
+      const newSel = [...phase.selected, npcKey];
+
+      if (newSel.length < phase.count) {
+        // Still need more selections — just update the phase
+        return { ...prev, npcSelectPhase: { ...phase, selected: newSel } };
+      }
+
+      // All NPCs selected — build NPC dialogue steps and queue a _goto_turn3 sentinel.
+      // The sentinel is consumed AFTER the update steps run, so buildTurn3Steps sees
+      // the correct knows_secret / suspects values when it fires.
+      const npcSteps = buildTurn2NpcSteps(prev, newSel);
+      const allSteps = [...npcSteps, { type: '_goto_turn3' }];
+
+      return consumeSentinels(processStep({
+        ...prev,
+        npcSelectPhase:  null,
+        waitingForInput: false,
+        choices:         [],
+        stepQueue:       allSteps,
+      }));
+    });
+  }, []);
+
+  // ── Title screen click ────────────────────────────────────────
+  const handleTitleClick = React.useCallback(() => {
+    setState(prev => {
+      if (prev.currentTurn !== 0) return prev;
+      const newState = { ...prev, currentTurn: 1 };
+      const steps = buildTurn1Steps(newState);
+      return consumeSentinels(processStep({ ...newState, stepQueue: steps }));
+    });
+  }, []);
+
+  // ── Replay ────────────────────────────────────────────────────
+  const handleReplay = React.useCallback(() => {
+    if (twRef.current) clearInterval(twRef.current);
+    setState(getInitialState());
+  }, []);
+
+  // ── Overlay toggles ───────────────────────────────────────────
+  const toggleSource    = () => setState(p => ({ ...p, showSourceCode: !p.showSourceCode }));
+  const toggleChronicle = () => setState(p => ({ ...p, showChronicle:  !p.showChronicle  }));
+  const toggleAbout     = () => setState(p => ({ ...p, showAbout:      !p.showAbout      }));
+
+  // ── Displayed text (typewriter slice) ─────────────────────────
+  const displayedText = state.currentLine
+    ? state.currentLine.text.substring(0, state.charIndex)
+    : '';
+
+  // Expose _dragons to map state so the badge renders correctly
+  const mapState = {
+    ...state.map,
+    _dragons:    state.lysara.dragons,
+    _dragonsSet: state.currentTurn >= 5,
+  };
+
+  // ── Render ────────────────────────────────────────────────────
+  return (
+    <div style={{
+      height:'100vh', display:'flex', flexDirection:'column',
+      backgroundColor:'#1a1a2e', overflow:'hidden',
+    }}
+    onClick={state.currentTurn === 0 ? handleTitleClick : undefined}>
+
+      <TopBar
+        currentTurn={state.currentTurn}
+        onAbout={toggleAbout}
+        onSource={toggleSource}
+        onChronicle={toggleChronicle}
+      />
+
+      <MainViewport
+        currentTurn={state.currentTurn}
+        mapState={mapState}
+        aldricLocation={state.aldric.location}
+      />
+
+      {/* Dialogue panel — hidden on title screen */}
+      {state.currentTurn > 0 && (
+        <DialoguePanel
+          currentLine={state.currentLine}
+          displayedText={displayedText}
+          isTyping={state.isTyping}
+          waitingForInput={state.waitingForInput}
+          choices={state.choices}
+          npcSelectPhase={state.npcSelectPhase}
+          onAdvance={handleAdvance}
+          onChoice={handleChoice}
+          onNpcSelect={handleNpcSelect}
+          chronicleLog={state.chronicleLog}
+          gameOver={state.gameOver}
+          onReplay={handleReplay}
+        />
+      )}
+
+      {/* Bottom bar — toggles + last dice result */}
+      {state.currentTurn > 0 && !state.gameOver && (
+        <div style={{
+          height:34, flexShrink:0, backgroundColor:'#16213e',
+          borderTop:'1px solid #0f3460',
+          display:'flex', alignItems:'center', padding:'0 12px', gap:14,
+        }}>
+          {[
+            { label:'[ SOURCE CODE ]',   toggle:toggleSource,    active:state.showSourceCode },
+            { label:'[ CHRONICLE LOG ]', toggle:toggleChronicle, active:state.showChronicle  },
+          ].map(b => (
+            <button key={b.label} onClick={b.toggle} style={{
+              background:'none', border:'none',
+              color: b.active ? '#00ffff' : '#606060',
+              fontFamily:'monospace', fontSize:11,
+              cursor:'pointer', letterSpacing:1,
+              transition:'color 0.12s',
+            }}>
+              {b.label}
+            </button>
+          ))}
+          <div style={{ flex:1 }}/>
+          {state.diceLog.length > 0 && (
+            <span style={{ color:'#404040', fontFamily:'monospace', fontSize:10 }}>
+              last roll: {state.diceLog[state.diceLog.length - 1]?.result}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Overlays */}
+      <SourceCodeOverlay
+        visible={state.showSourceCode}
+        currentTurn={state.currentTurn}
+        onClose={toggleSource}
+      />
+      <ChronicleOverlay
+        visible={state.showChronicle}
+        gs={state}
+        onClose={toggleChronicle}
+      />
+      <AboutOverlay
+        visible={state.showAbout}
+        onClose={toggleAbout}
+      />
+
+      {/* Dice animation — fixed overlay, pointer-events:none */}
+      <DiceAnimation
+        animating={state.diceAnimating}
+        result={state.diceResult}
+        isGood={state.diceIsGood}
+      />
+    </div>
+  );
+}
+
+// ================================================================
+// MOUNT
+// ================================================================
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+</script>
+</body>
+</html>
