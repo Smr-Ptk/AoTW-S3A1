@@ -871,14 +871,14 @@ function buildEndingSteps(gs, ending) {
 // NPC PORTRAIT — 64×64 SVG silhouettes (PRD §6)
 // One distinguishing feature per character, faction-colored fills.
 // ----------------------------------------------------------------
-function NpcPortrait({ character }) {
+function NpcPortrait({ character, size = 64 }) {
   const info = NPC[character] || NPC.narrator;
   const c = info.color;
 
   const portraits = {
     // Crown: rounded head + three-point crown
     crown: (
-      <svg width="64" height="64" viewBox="0 0 64 64">
+      <svg width={size} height={size} viewBox="0 0 64 64">
         <ellipse cx="32" cy="57" rx="24" ry="13" fill={c} opacity="0.85"/>
         <circle  cx="32" cy="31" r="15"  fill={c}/>
         <polygon points="19,23 23,13 28,21 32,9 36,21 41,13 45,23"
@@ -889,7 +889,7 @@ function NpcPortrait({ character }) {
     ),
     // Collar: head + textured fur/armour collar
     collar: (
-      <svg width="64" height="64" viewBox="0 0 64 64">
+      <svg width={size} height={size} viewBox="0 0 64 64">
         <ellipse cx="32" cy="57" rx="24" ry="13" fill={c} opacity="0.85"/>
         <path d="M11,53 Q21,42 32,44 Q43,42 53,53 L53,64 L11,64Z" fill={c} opacity="0.7"/>
         <path d="M15,51 Q23,41 32,43 Q41,41 49,51" stroke="#d4c090" strokeWidth="1.8" fill="none"/>
@@ -900,7 +900,7 @@ function NpcPortrait({ character }) {
     ),
     // Long hair: flowing hair down both sides
     longhair: (
-      <svg width="64" height="64" viewBox="0 0 64 64">
+      <svg width={size} height={size} viewBox="0 0 64 64">
         <ellipse cx="32" cy="57" rx="24" ry="13" fill={c} opacity="0.85"/>
         <path d="M17,27 Q12,46 15,62 Q21,56 23,48 L32,64 L41,48 Q43,56 49,62 Q52,46 47,27 Q40,17 32,17 Q24,17 17,27Z"
               fill={c} opacity="0.8"/>
@@ -911,7 +911,7 @@ function NpcPortrait({ character }) {
     ),
     // Short: compact figure — Halric's slight stature
     short: (
-      <svg width="64" height="64" viewBox="0 0 64 64">
+      <svg width={size} height={size} viewBox="0 0 64 64">
         <ellipse cx="32" cy="59" rx="20" ry="11" fill={c} opacity="0.85"/>
         <circle  cx="32" cy="38" r="15" fill={c}/>
         <circle cx="27" cy="37" r="2" fill="#0a0a1e"/>
@@ -921,7 +921,7 @@ function NpcPortrait({ character }) {
     ),
     // Goatee: pointed chin hair — Aldren the whisperer
     goatee: (
-      <svg width="64" height="64" viewBox="0 0 64 64">
+      <svg width={size} height={size} viewBox="0 0 64 64">
         <ellipse cx="32" cy="57" rx="24" ry="13" fill={c} opacity="0.85"/>
         <circle  cx="32" cy="30" r="15" fill={c}/>
         <path d="M28,43 Q30,54 32,58 Q34,54 36,43" fill={c} stroke="#0a1e0a" strokeWidth="0.5"/>
@@ -931,7 +931,7 @@ function NpcPortrait({ character }) {
     ),
     // Hood: cloaked figure — Corwin Frost of the Barrier Watch
     hood: (
-      <svg width="64" height="64" viewBox="0 0 64 64">
+      <svg width={size} height={size} viewBox="0 0 64 64">
         <ellipse cx="32" cy="57" rx="24" ry="13" fill={c} opacity="0.85"/>
         <path d="M8,42 Q16,28 32,26 Q48,28 56,42 L56,64 L8,64Z" fill={c} opacity="0.8"/>
         <path d="M16,29 Q18,18 32,16 Q46,18 48,29 Q40,21 32,21 Q24,21 16,29Z" fill="#060614"/>
@@ -941,7 +941,7 @@ function NpcPortrait({ character }) {
     ),
     // Scroll: narrator/chronicler — quill and parchment detail
     scroll: (
-      <svg width="64" height="64" viewBox="0 0 64 64">
+      <svg width={size} height={size} viewBox="0 0 64 64">
         <ellipse cx="32" cy="57" rx="24" ry="13" fill={c} opacity="0.7"/>
         <circle  cx="32" cy="30" r="15" fill={c}/>
         <rect x="38" y="38" width="9" height="15" rx="2" fill="#f5e6c8" stroke="#9a7830" strokeWidth="1"/>
@@ -960,7 +960,7 @@ function NpcPortrait({ character }) {
 // VALDRUN MAP — SVG with faction-color-bound regions (PRD §6)
 // CSS transitions on fill provide smooth Turn 4 territory animation.
 // ----------------------------------------------------------------
-function ValdrunMap({ mapState, turn5 }) {
+function ValdrunMap({ mapState, turn5, compact = false }) {
   const col = (k) => FACTION_COLOR[mapState[k]] ?? FACTION_COLOR.neutral;
 
   return (
@@ -1048,21 +1048,25 @@ function ValdrunMap({ mapState, turn5 }) {
         </g>
       )}
 
-      {/* Legend */}
-      <rect x="8" y="258" width="128" height="58" rx="3"
-            fill="#16213e" stroke="#0f3460" strokeWidth="1" opacity="0.9"/>
-      <text x="14" y="272" fill="#00ffff" fontSize="8" fontFamily="monospace">FACTION CONTROL</text>
-      {[
-        { k:'ashward',   label:'Ashward'   },
-        { k:'golmere',   label:'Golmere'   },
-        { k:'storrund',  label:'Storrund'  },
-        { k:'vaelthorne',label:'Vaelthorne'},
-      ].map((f,i) => (
-        <g key={f.k}>
-          <rect x="14" y={279+i*11} width="8" height="8" fill={FACTION_COLOR[f.k]}/>
-          <text x="26" y={287+i*11} fill="#e0e0e0" fontSize="8" fontFamily="monospace">{f.label}</text>
-        </g>
-      ))}
+      {/* Legend — hidden in compact/inset mode */}
+      {!compact && (
+        <>
+          <rect x="8" y="258" width="128" height="58" rx="3"
+                fill="#16213e" stroke="#0f3460" strokeWidth="1" opacity="0.9"/>
+          <text x="14" y="272" fill="#00ffff" fontSize="8" fontFamily="monospace">FACTION CONTROL</text>
+          {[
+            { k:'ashward',   label:'Ashward'   },
+            { k:'golmere',   label:'Golmere'   },
+            { k:'storrund',  label:'Storrund'  },
+            { k:'vaelthorne',label:'Vaelthorne'},
+          ].map((f,i) => (
+            <g key={f.k}>
+              <rect x="14" y={279+i*11} width="8" height="8" fill={FACTION_COLOR[f.k]}/>
+              <text x="26" y={287+i*11} fill="#e0e0e0" fontSize="8" fontFamily="monospace">{f.label}</text>
+            </g>
+          ))}
+        </>
+      )}
 
       {/* Dragons counter bottom-right */}
       <text x="408" y="314" textAnchor="end"
@@ -1164,27 +1168,139 @@ function TopBar({ currentTurn, onAbout, onSource, onChronicle }) {
 }
 
 // ----------------------------------------------------------------
+// SCENE ATMOSPHERE — per-scene SVG motifs rendered at low opacity
+// behind the location text and portraits.
+// ----------------------------------------------------------------
+function SceneAtmosphere({ turn }) {
+  const s = { position:'absolute', inset:0, width:'100%', height:'100%', pointerEvents:'none' };
+
+  if (turn === 0) return (
+    // Title: heraldic crown + corner filigrees
+    <svg style={s} viewBox="0 0 800 400" preserveAspectRatio="xMidYMid slice">
+      {/* Large faint crown, center-top */}
+      <polygon points="330,50 355,14 374,42 400,4 426,42 445,14 470,50 470,120 330,120"
+               fill="none" stroke="#ffd700" strokeWidth="1.5" opacity="0.1"/>
+      <line x1="330" y1="120" x2="470" y2="120" stroke="#ffd700" strokeWidth="1" opacity="0.1"/>
+      {/* Crown jewel dots */}
+      <circle cx="355" cy="48" r="3" fill="#ffd700" opacity="0.1"/>
+      <circle cx="400" cy="34" r="3" fill="#ffd700" opacity="0.1"/>
+      <circle cx="445" cy="48" r="3" fill="#ffd700" opacity="0.1"/>
+      {/* Corner filigrees — TL */}
+      <path d="M12,12 L72,12 L72,24 M12,12 L12,72 L24,72" fill="none" stroke="#ffd700" strokeWidth="1.5" opacity="0.15"/>
+      <circle cx="72" cy="12" r="3" fill="#ffd700" opacity="0.12"/>
+      <circle cx="12" cy="72" r="3" fill="#ffd700" opacity="0.12"/>
+      {/* Corner filigrees — TR */}
+      <path d="M788,12 L728,12 L728,24 M788,12 L788,72 L776,72" fill="none" stroke="#ffd700" strokeWidth="1.5" opacity="0.15"/>
+      <circle cx="728" cy="12" r="3" fill="#ffd700" opacity="0.12"/>
+      <circle cx="788" cy="72" r="3" fill="#ffd700" opacity="0.12"/>
+      {/* Corner filigrees — BL */}
+      <path d="M12,388 L72,388 L72,376 M12,388 L12,328 L24,328" fill="none" stroke="#ffd700" strokeWidth="1.5" opacity="0.15"/>
+      {/* Corner filigrees — BR */}
+      <path d="M788,388 L728,388 L728,376 M788,388 L788,328 L776,328" fill="none" stroke="#ffd700" strokeWidth="1.5" opacity="0.15"/>
+      {/* Faint diagonal corner accents */}
+      <line x1="12" y1="12" x2="100" y2="100" stroke="#ffd700" strokeWidth="0.5" opacity="0.07"/>
+      <line x1="788" y1="12" x2="700" y2="100" stroke="#ffd700" strokeWidth="0.5" opacity="0.07"/>
+    </svg>
+  );
+
+  if (turn === 1) return (
+    // Greyholt: stone archway + icicles + scattered snow
+    <svg style={s} viewBox="0 0 800 400" preserveAspectRatio="xMidYMid slice">
+      {/* Archway */}
+      <path d="M270,400 L270,190 Q270,90 400,90 Q530,90 530,190 L530,400"
+            fill="none" stroke="#a8d8ea" strokeWidth="2" opacity="0.14"/>
+      {/* Stone course lines on arch legs */}
+      <path d="M270,290 Q335,270 400,270 Q465,270 530,290" fill="none" stroke="#a8d8ea" strokeWidth="0.8" opacity="0.08"/>
+      <path d="M270,350 Q335,332 400,332 Q465,332 530,350" fill="none" stroke="#a8d8ea" strokeWidth="0.8" opacity="0.08"/>
+      {/* Icicles along top edge */}
+      {[30,75,122,170,220,268,320,380,440,490,540,590,640,690,730,768].map((x,i) => (
+        <polygon key={i} points={`${x-5},0 ${x+5},0 ${x},${14+(i%4)*10}`}
+                 fill="#a8d8ea" opacity="0.13"/>
+      ))}
+      {/* Snow particles */}
+      {[55,140,230,380,500,610,700,760].map((x,i) => (
+        <circle key={i} cx={x} cy={30+(i%5)*60} r="2" fill="#a8d8ea" opacity="0.18"/>
+      ))}
+      {/* Far wall stone lines */}
+      <line x1="0" y1="200" x2="800" y2="200" stroke="#4a7090" strokeWidth="0.6" opacity="0.07"/>
+      <line x1="0" y1="280" x2="800" y2="280" stroke="#4a7090" strokeWidth="0.6" opacity="0.07"/>
+    </svg>
+  );
+
+  if (turn === 2 || turn === 3) return (
+    // Crownharbour: columns + throne + coffered ceiling
+    <svg style={s} viewBox="0 0 800 400" preserveAspectRatio="xMidYMid slice">
+      {/* Left column */}
+      <rect x="82" y="18" width="32" height="370" fill="#c0a030" opacity="0.11" rx="3"/>
+      <rect x="70" y="12" width="56" height="20" fill="#c0a030" opacity="0.14" rx="2"/>
+      <rect x="70" y="376" width="56" height="18" fill="#c0a030" opacity="0.14" rx="2"/>
+      {/* Right column */}
+      <rect x="686" y="18" width="32" height="370" fill="#c0a030" opacity="0.11" rx="3"/>
+      <rect x="674" y="12" width="56" height="20" fill="#c0a030" opacity="0.14" rx="2"/>
+      <rect x="674" y="376" width="56" height="18" fill="#c0a030" opacity="0.14" rx="2"/>
+      {/* Throne silhouette */}
+      <rect x="363" y="308" width="74" height="92" fill="#c0a030" opacity="0.09" rx="2"/>
+      <rect x="352" y="276" width="96" height="38" fill="#c0a030" opacity="0.1" rx="3"/>
+      <rect x="357" y="232" width="14" height="52" fill="#c0a030" opacity="0.1"/>
+      <rect x="429" y="232" width="14" height="52" fill="#c0a030" opacity="0.1"/>
+      {/* Crown above throne */}
+      <polygon points="376,228 388,206 400,222 412,202 424,218 436,206 448,228"
+               fill="none" stroke="#ffd700" strokeWidth="1.2" opacity="0.18"/>
+      {/* Coffered ceiling verticals */}
+      {[114,214,314,486,586,686].map((x,i) => (
+        <line key={i} x1={x} y1="0" x2={x} y2="56" stroke="#c0a030" strokeWidth="0.8" opacity="0.1"/>
+      ))}
+      {/* Coffered ceiling horizontals */}
+      <line x1="114" y1="30" x2="686" y2="30" stroke="#c0a030" strokeWidth="0.6" opacity="0.09"/>
+      <line x1="114" y1="56" x2="686" y2="56" stroke="#c0a030" strokeWidth="0.8" opacity="0.1"/>
+    </svg>
+  );
+
+  if (turn === 6) return (
+    // Chronicle: manuscript ruled lines + scroll corner curls
+    <svg style={s} viewBox="0 0 800 400" preserveAspectRatio="xMidYMid slice">
+      {/* Ruled lines */}
+      {Array.from({length:14},(_,i) => (
+        <line key={i} x1="60" y1={38+i*24} x2="740" y2={38+i*24}
+              stroke="#00ffff" strokeWidth="0.5" opacity="0.07"/>
+      ))}
+      {/* Left margin line */}
+      <line x1="92" y1="20" x2="92" y2="378" stroke="#00ffff" strokeWidth="1" opacity="0.1"/>
+      {/* Scroll curl — top-right */}
+      <path d="M730,18 Q772,18 772,58 Q772,82 748,82" fill="none" stroke="#c8a060" strokeWidth="1.5" opacity="0.14"/>
+      <path d="M730,18 Q708,18 708,40 Q708,58 730,58" fill="none" stroke="#c8a060" strokeWidth="1" opacity="0.1"/>
+      {/* Scroll curl — bottom-right */}
+      <path d="M730,382 Q772,382 772,342 Q772,318 748,318" fill="none" stroke="#c8a060" strokeWidth="1.5" opacity="0.14"/>
+      <path d="M730,382 Q708,382 708,360 Q708,342 730,342" fill="none" stroke="#c8a060" strokeWidth="1" opacity="0.1"/>
+    </svg>
+  );
+
+  return null;
+}
+
+// ----------------------------------------------------------------
 // MAIN VIEWPORT
 // Turns 0–3, 6: colored scene background + location text
 // Turns 4–5:    SVG map of Valdrun
 // ----------------------------------------------------------------
-function MainViewport({ currentTurn, mapState, aldricLocation }) {
+function MainViewport({ currentTurn, mapState, aldricLocation, activeSpeaker, npcSelectPhase }) {
   const SCENES = {
-    0: { bg:'#080814', loc:'',              sub:'' },
-    1: { bg:'#18283a', loc:'GREYHOLT',      sub:'The frozen great hall of House Ashward.' },
-    2: { bg:'#281838', loc:'CROWNHARBOUR',  sub:'The throne room. Gilded. Treacherous.' },
-    3: { bg:'#180a0a', loc:'CROWNHARBOUR',  sub:'The crown changes hands. Iron in the air.' },
-    6: { bg:'#0a1808', loc:'CHRONICLE LOG', sub:'The record is complete.' },
+    0: { gradient:'radial-gradient(ellipse at 50% 55%, #0d0d28 0%, #080814 72%)', loc:'',              sub:'' },
+    1: { gradient:'radial-gradient(ellipse at 50% 30%, #1e3448 0%, #0c1820 72%)', loc:'GREYHOLT',      sub:'The frozen great hall of House Ashward.' },
+    2: { gradient:'radial-gradient(ellipse at 50% 30%, #38203e 0%, #160c1e 72%)', loc:'CROWNHARBOUR',  sub:'The throne room. Gilded. Treacherous.' },
+    3: { gradient:'radial-gradient(ellipse at 50% 30%, #300a0a 0%, #0e0606 72%)', loc:'CROWNHARBOUR',  sub:'The crown changes hands. Iron in the air.' },
+    6: { gradient:'radial-gradient(ellipse at 50% 50%, #102010 0%, #060e04 72%)', loc:'CHRONICLE LOG', sub:'The record is complete.' },
   };
 
-  const showMap = currentTurn === 4 || currentTurn === 5;
+  const showMap    = currentTurn === 4 || currentTurn === 5;
+  const showInset  = (currentTurn >= 1 && currentTurn <= 3) || currentTurn === 6;
+  const showSpeaker = activeSpeaker && activeSpeaker !== 'narrator' && !npcSelectPhase;
 
   if (showMap) {
     return (
       <div style={{ flex:1, backgroundColor:'#081420', display:'flex',
                     alignItems:'center', justifyContent:'center', overflow:'hidden', position:'relative' }}>
         <ValdrunMap mapState={mapState} turn5={currentTurn === 5}/>
-        {/* Dragon count badge overlay */}
         {mapState._dragons > 0 && (
           <div style={{
             position:'absolute', bottom:12, right:12,
@@ -1200,10 +1316,11 @@ function MainViewport({ currentTurn, mapState, aldricLocation }) {
   }
 
   const s = SCENES[currentTurn] ?? SCENES[1];
+  const speakerColor = (activeSpeaker && NPC[activeSpeaker]?.color) ?? '#e0e0e0';
 
   return (
     <div style={{
-      flex:1, backgroundColor:s.bg, display:'flex', flexDirection:'column',
+      flex:1, background:s.gradient, display:'flex', flexDirection:'column',
       alignItems:'center', justifyContent:'center', position:'relative', overflow:'hidden',
     }}>
       {/* Subtle grid lines */}
@@ -1216,6 +1333,9 @@ function MainViewport({ currentTurn, mapState, aldricLocation }) {
           <line key={`h${i}`} x1="0" y1={i*20} x2="400" y2={i*20} stroke="#4a6090" strokeWidth="1"/>
         ))}
       </svg>
+
+      {/* Scene atmosphere decoration */}
+      <SceneAtmosphere turn={currentTurn} />
 
       {currentTurn === 0 ? (
         // Title screen
@@ -1239,8 +1359,32 @@ function MainViewport({ currentTurn, mapState, aldricLocation }) {
           </div>
         </div>
       ) : (
-        // Scene label
-        <div style={{ textAlign:'center', position:'relative', zIndex:1 }}>
+        // Scene: optional focal portrait + location label
+        <div style={{ textAlign:'center', position:'relative', zIndex:1,
+                      display:'flex', flexDirection:'column', alignItems:'center' }}>
+
+          {/* Focal portrait — non-narrator active speaker */}
+          {showSpeaker && (
+            <div style={{ marginBottom:14, display:'flex', flexDirection:'column', alignItems:'center' }}>
+              <div style={{
+                padding:6,
+                border:`2px solid ${speakerColor}`,
+                borderRadius:4,
+                boxShadow:`0 0 20px 6px ${speakerColor}33`,
+                backgroundColor:'rgba(8,8,20,0.55)',
+              }}>
+                <NpcPortrait character={activeSpeaker} size={100} />
+              </div>
+              <div style={{
+                color: speakerColor,
+                fontFamily:'monospace', fontSize:10, letterSpacing:2,
+                marginTop:7, textTransform:'uppercase',
+              }}>
+                {NPC[activeSpeaker]?.name ?? activeSpeaker}
+              </div>
+            </div>
+          )}
+
           {s.loc && (
             <>
               <div style={{ color:'#00ffff', fontFamily:'monospace', fontSize:10,
@@ -1259,12 +1403,29 @@ function MainViewport({ currentTurn, mapState, aldricLocation }) {
         </div>
       )}
 
+      {/* Mini map inset — bottom-left, turns 1–3 and 6 */}
+      {showInset && (
+        <div style={{
+          position:'absolute', bottom:10, left:10,
+          width:172, border:'1px solid #0f3460',
+          backgroundColor:'rgba(8,20,32,0.88)', overflow:'hidden',
+          zIndex:2,
+        }}>
+          <div style={{
+            color:'#00ffff', fontFamily:'monospace', fontSize:8, letterSpacing:2,
+            padding:'3px 6px', borderBottom:'1px solid #0f3460', textAlign:'center',
+          }}>VALDRUN</div>
+          <ValdrunMap mapState={mapState} turn5={false} compact />
+        </div>
+      )}
+
       {/* Aldric status badge for turns 2+ */}
       {currentTurn >= 2 && aldricLocation && (
         <div style={{
           position:'absolute', top:12, right:14,
           backgroundColor:'#16213e', border:'1px solid #0f3460',
           padding:'5px 10px', fontFamily:'monospace', fontSize:10, color:'#e0e0e0',
+          zIndex:2,
         }}>
           <div style={{ color:'#808080', marginBottom:2 }}>ALDRIC ASHWARD</div>
           <div style={{ color: aldricLocation === 'Greyholt' ? '#808080' : '#ffd700' }}>
@@ -1891,6 +2052,8 @@ function App() {
         currentTurn={state.currentTurn}
         mapState={mapState}
         aldricLocation={state.aldric.location}
+        activeSpeaker={state.currentLine?.speaker ?? null}
+        npcSelectPhase={state.npcSelectPhase}
       />
 
       {/* Dialogue panel — hidden on title screen */}
